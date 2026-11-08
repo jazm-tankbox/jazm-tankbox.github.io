@@ -1,6 +1,6 @@
 (function(){
 'use strict';
-const APP_VERSION='0.1.0.1';
+const APP_VERSION='0.2.0.1';
 /* Eigener Speicher je Adresse: die Live-App unter / behält ihre Namen, eine Test-App unter /test/ bekommt eigene */
 const BASE=location.pathname.replace(/[^/]*$/,'');
 const NS=BASE==='/'?'':BASE.replace(/^\/|\/$/g,'').replace(/[^a-z0-9]+/gi,'-').toLowerCase()+'-';
@@ -18,6 +18,7 @@ const fmtS=s=>s?fmtD(parse(s)):'–';
 const nf=(n,d)=>Number(n||0).toLocaleString('de-DE',{minimumFractionDigits:d,maximumFractionDigits:d});
 const eur=n=>Number(n||0).toLocaleString('de-DE',{style:'currency',currency:'EUR'});
 const km=n=>nf(n,0)+' km';
+const eur0=n=>Number(n||0).toLocaleString('de-DE',{style:'currency',currency:'EUR',maximumFractionDigits:0});
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
 const num=v=>{if(v==null)return NaN;let s=String(v).trim().replace(/\s|€|l|km/gi,'');if(!s)return NaN;
@@ -287,8 +288,9 @@ function closeSheet(anim){
 }
 addEventListener('popstate',()=>{if(ignorePop){ignorePop=false;return}histPushed=false;
   const d=document.getElementById('dsdlg');if(d&&d.open){d.close();return}
+  if(fanOpen){setFan(false);return}
   if(root.firstElementChild)closeSheet()});
-document.addEventListener('keydown',e=>{if(e.key==='Escape'&&root.firstElementChild)closeSheet()});
+document.addEventListener('keydown',e=>{if(e.key!=='Escape')return;if(fanOpen)setFan(false);else if(root.firstElementChild)closeSheet()});
 const head=t=>`<div class="sheethead"><h2>${t}</h2><button type="button" class="icobtn" data-close aria-label="Schließen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>`;
 
 /* Kleines Fenster für Eingaben (GitHub einrichten, App-Update) – wie in den anderen Boxen */
@@ -323,16 +325,18 @@ function fillRow(f,c,i){const x=c[f.id]||{};const d=parse(f.datum);
     <span class="main"><span class="t">${nf(f.liter,2)} l${f.sorte?' · '+esc(f.sorte):''}</span><span class="s">${km(f.km)}${f.station?' · '+esc(f.station):''}${f.voll===false?' · teilweise':''}</span>
     ${x.verb!=null?`<span class="s">${nf(x.verb,1)} l/100 km auf ${km(x.seit)}</span>`:''}</span>
     <span class="ramt"><span class="amt num">${eur(f.betrag)}</span>${f.ppl?`<small class="muted num">${nf(f.ppl,3)} €/l</small>`:''}${f.foto?`<small class="muted" aria-label="mit Foto">${svg('cam','mini-ic')}</small>`:''}</span></button>`}
+let first=true;
 function render(){
   if(!db)return;bkDot();
   document.querySelectorAll('nav.tabs [data-tab]').forEach(b=>b.setAttribute('aria-current',b.dataset.tab===tab?'page':'false'));
-  const ind=document.querySelector('nav.tabs .ind');if(ind)ind.style.transform=`translateX(${TABS.indexOf(tab)*100}%)`;
+  setInd(TABS.indexOf(tab));
   const s=stats();
   if(tab==='home')main.innerHTML=viewHome(s);else if(tab==='liste')main.innerHTML=viewList(s);else main.innerHTML=viewStats(s);
   main.querySelectorAll('[data-fill]').forEach(b=>b.onclick=()=>openDetail(b.dataset.fill));
   const rm=main.querySelector('[data-bk]');if(rm)rm.onclick=()=>openMenu('gh');
   const nb=main.querySelector('[data-new]');if(nb)nb.onclick=()=>openForm(null,nb.dataset.new==='foto');
   const all=main.querySelector('[data-all]');if(all)all.onclick=()=>goTab('liste');
+  countUps(first);first=false;
 }
 function viewHome(s){
   const recent=byDate().slice(0,4);
@@ -342,11 +346,11 @@ function viewHome(s){
     ${ghCfg()?'':`<p class="hint">Neues Handy? Unter <b>Daten</b> → Datensicherung → „GitHub einrichten“ holst du deine Tankungen aus GitHub zurück.</p>`}</section>`;
   return `<section class="view">${DS.remindHtml(bkInfo(),'data-bk')}
     <div class="summary">
-      <div><div class="label">Durchschnittsverbrauch</div><div class="bigcost"><span class="num">${s.avg!=null?nf(s.avg,1):'–'}</span><small>l/100 km${s.avg==null?' · ab zwei vollen Tankungen':''}</small></div></div>
+      <div><div class="label">Durchschnittsverbrauch</div><div class="bigcost"><span class="num"${s.avg!=null?` data-count="avg" data-v="${s.avg}" data-f="l1"`:''}>${s.avg!=null?nf(s.avg,1):'–'}</span><small>l/100 km${s.avg==null?' · ab zwei vollen Tankungen':''}</small></div></div>
       <div class="facts">
-        <div class="fact"><b class="num">${eur(s.year).replace(/,\d\d\s/,' ')}</b><span>Kosten ${new Date().getFullYear()}<br><small>${s.yearN} Tankung${s.yearN===1?'':'en'}</small></span></div>
-        <div class="fact"><b class="num">${s.per100!=null?eur(s.per100).replace(/\s€/,' €'):'–'}</b><span>pro 100 km</span></div>
-        <div class="fact"><b class="num">${s.kmNow!=null?nf(s.kmNow,0):'–'}</b><span>km-Stand</span></div>
+        <div class="fact"><b class="num" data-count="year" data-v="${s.year}" data-f="eur0">${eur0(s.year)}</b><span>Kosten ${new Date().getFullYear()}<br><small>${s.yearN} Tankung${s.yearN===1?'':'en'}</small></span></div>
+        <div class="fact"><b class="num"${s.per100!=null?` data-count="p100" data-v="${s.per100}" data-f="eur"`:''}>${s.per100!=null?eur(s.per100):'–'}</b><span>pro 100 km</span></div>
+        <div class="fact"><b class="num"${s.kmNow!=null?` data-count="km" data-v="${s.kmNow}" data-f="n0"`:''}>${s.kmNow!=null?nf(s.kmNow,0):'–'}</b><span>km-Stand</span></div>
       </div></div>
     <div><div class="sechead"><h2>Letzte Tankungen</h2><button type="button" class="ghost" data-all>Alle ${db.fills.length}</button></div>
       <div class="list" style="margin-top:10px">${recent.map((f,i)=>fillRow(f,s.c,i)).join('')}</div></div>
@@ -376,15 +380,15 @@ function viewStats(s){
     ${pp.length?`<div class="summary"><div class="label">Bezahlter Preis pro Liter</div>
       <dl class="kv" style="margin:0">${pp.map(f=>`<dt>${fmtS(f.datum)}</dt><dd class="num">${nf(f.ppl,3)} €${f.station?' · '+esc(f.station):''}</dd>`).join('')}</dl></div>`:''}
   </section>`}
-function goTab(t){if(t===tab)return;const dir=TABS.indexOf(t)-TABS.indexOf(tab);tab=t;render();window.scrollTo(0,0);DS.tabIn(main,dir);buzz(4)}
+
 
 /* ---------- Detail ---------- */
 async function openDetail(id){
   const f=db.fills.find(x=>x.id===id);if(!f)return;const x=calc()[f.id]||{};
   let url=null;if(f.foto){const b=await fotoGet(f.foto).catch(()=>null);if(b)url=URL.createObjectURL(b)}
   openSheet(head(fmtS(f.datum)+(f.zeit?' · '+esc(f.zeit):''))+`
-    ${x.verb!=null?`<div class="hero h-ok"><span class="hl">Verbrauch</span><b class="num">${nf(x.verb,1)} l/100 km</b><span class="hs">auf ${km(x.seit)} seit der letzten vollen Tankung</span></div>`:''}
-    ${url?`<img class="photo" src="${url}" alt="Quittung">`:''}
+    ${x.verb!=null?`<div class="hero h-ok tiltme"><span class="hl">Verbrauch</span><b class="num">${nf(x.verb,1)} l/100 km</b><span class="hs">auf ${km(x.seit)} seit der letzten vollen Tankung</span></div>`:''}
+    ${url?`<img class="photo tiltme" src="${url}" alt="Quittung">`:''}
     <dl class="kv">
       <dt>Kilometerstand</dt><dd class="num">${km(f.km)}${x.dist!=null?` <span class="muted">(+${nf(x.dist,0)})</span>`:''}</dd>
       <dt>Getankt</dt><dd class="num">${nf(f.liter,2)} l${f.voll===false?' · teilweise':' · voll'}</dd>
@@ -626,10 +630,143 @@ function openMenu(open){
   });
 }
 
+/* ================= Gesten & Bewegung – wie in der MyBelegBox ================= */
+/* Zahlen hochzählen lassen */
+let shown={};
+const FMT={eur,eur0,l1:n=>nf(n,1),n0:n=>nf(n,0)};
+function countUps(fromZero){
+  main.querySelectorAll('[data-count]').forEach(el=>{
+    const k=el.dataset.count,to=Number(el.dataset.v)||0,f=FMT[el.dataset.f]||(n=>String(Math.round(n)));
+    const from=fromZero?(k==='km'?Math.max(0,to-800):0):(k in shown?shown[k]:to);shown[k]=to;
+    if(!motion()||from===to){el.textContent=f(to);return}
+    const t0=performance.now(),D=fromZero?900:650;el.textContent=f(from);
+    const step=now=>{if(!el.isConnected)return;const p=Math.min(1,(now-t0)/D),e=1-Math.pow(1-p,3);
+      el.textContent=f(p<1?from+(to-from)*e:to);if(p<1)requestAnimationFrame(step)};
+    requestAnimationFrame(step)})
+}
+/* Tabs: Antippen oder Wischen */
+const ind=document.querySelector('nav.tabs .ind');
+function setInd(x,drag){if(!ind)return;ind.classList.toggle('drag',!!drag);ind.style.setProperty('--ti',String(x))}
+let tabBusy=false;
+function goTab(t,fromX){
+  if(!db||tabBusy)return;
+  const a=TABS.indexOf(tab),b=TABS.indexOf(t);
+  if(a===b){window.scrollTo({top:0,behavior:motion()?'smooth':'auto'});return}
+  const dir=b>a?1:-1;tab=t;setInd(b);buzz(6);
+  if(fanOpen)setFan(false);
+  if(!motion()){render();window.scrollTo(0,0);return}
+  tabBusy=true;setTimeout(()=>{tabBusy=false},700);
+  const W=main.clientWidth||innerWidth,x0=fromX||0,op=main.style.opacity||'1';
+  main.style.transform='';main.style.opacity='';
+  const out=main.animate([{transform:`translateX(${x0}px)`,opacity:op},{transform:`translateX(${-dir*W*.45}px)`,opacity:0}],
+    {duration:fromX?150:120,easing:'cubic-bezier(.4,0,1,1)',fill:'forwards'});
+  out.onfinish=()=>{window.scrollTo(0,0);render();out.cancel();
+    main.animate([{transform:`translateX(${dir*W*.3}px)`,opacity:0},{transform:'none',opacity:1}],{duration:340,easing:'cubic-bezier(.2,.85,.25,1)'})
+      .onfinish=()=>{tabBusy=false}};
+}
+document.querySelectorAll('nav.tabs [data-tab]').forEach(b=>b.onclick=()=>goTab(b.dataset.tab));
+
+/* „Tanken“-Knopf als Fächer: mit Quittungsfoto oder ohne */
+const fab=document.getElementById('fab'),fan=document.getElementById('fan');
+let fanOpen=false;
+function setFan(open){
+  if(open===fanOpen)return;fanOpen=open;
+  fab.classList.toggle('open',open);fab.setAttribute('aria-expanded',String(open));fab.setAttribute('aria-label',open?'Schließen':'Neue Tankung');
+  if(open){fan.hidden=false;void fan.offsetWidth;fan.classList.add('show');buzz(6)}
+  else{fan.classList.remove('show');setTimeout(()=>{if(!fanOpen)fan.hidden=true},motion()?260:0)}
+}
+fab.onclick=()=>setFan(!fanOpen);
+fan.addEventListener('click',e=>{const b=e.target.closest('[data-neu]');setFan(false);if(!b)return;openForm(null,b.dataset.neu==='foto')});
+let lastY=0;addEventListener('scroll',()=>{const y=window.scrollY;if(Math.abs(y-lastY)<8)return;
+  fab.classList.toggle('shrunk',y>lastY&&y>120);lastY=y},{passive:true});
+
+/* Wischen zwischen Tabs & Zum Aktualisieren ziehen */
+const appEl=document.querySelector('.app'),ptr=document.getElementById('ptr');
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+let G=null,refreshing=false;
+document.addEventListener('touchstart',e=>{G=null;
+  if(e.touches.length!==1||!db||tabBusy||fanOpen||root.firstElementChild)return;
+  const t=e.target;if(t.closest&&t.closest('nav.tabs,.fab,#fan,#updRoot,#toastRoot,dialog,input,select,textarea'))return;
+  const p=e.touches[0];
+  G={x:p.clientX,y:p.clientY,mode:null,dx:0,dy:0,v:0,lx:p.clientX,lt:performance.now(),W:appEl.clientWidth||innerWidth,idx:TABS.indexOf(tab),hit:false,edge:false};
+},{passive:true});
+document.addEventListener('touchmove',e=>{
+  if(!G)return;const p=e.touches[0],dx=p.clientX-G.x,dy=p.clientY-G.y;
+  if(!G.mode){
+    if(Math.abs(dx)<10&&Math.abs(dy)<10)return;
+    if(Math.abs(dx)>Math.abs(dy)*1.3)G.mode='h';
+    else if(dy>0&&window.scrollY<=0&&!refreshing&&Math.abs(dy)>Math.abs(dx))G.mode='v';
+    else{G=null;return}
+  }
+  if(e.cancelable)e.preventDefault();
+  const now=performance.now(),dt=Math.max(1,now-G.lt);
+  if(G.mode==='h'){
+    G.v=.7*((p.clientX-G.lx)/dt)+.3*G.v;G.lx=p.clientX;G.lt=now;
+    G.edge=(G.idx===0&&dx>0)||(G.idx===TABS.length-1&&dx<0);
+    const x=G.edge?dx*.2:dx;G.dx=x;
+    main.style.transform=`translateX(${x}px)`;main.style.opacity=String(1-Math.min(.35,Math.abs(x)/G.W*.5));
+    setInd(G.edge?G.idx:G.idx-x/G.W,true);
+    const over=!G.edge&&Math.abs(x)>G.W*.28;if(over!==G.hit){G.hit=over;if(over)buzz(5)}
+  }else{
+    const pull=Math.min(120,dy*.5);G.dy=pull;
+    appEl.style.transform=`translateY(${pull}px)`;
+    ptr.style.opacity=String(Math.min(1,pull/28));ptr.style.transform=`translateY(${pull-52}px) rotate(${Math.min(1,pull/72)*300}deg)`;
+    const over=pull>=72;if(over!==G.hit){G.hit=over;ptr.classList.toggle('armed',over);if(over)buzz(8)}
+  }
+},{passive:false});
+function gEnd(e){
+  if(!G||!G.mode){G=null;return}const g=G;G=null;const ok=e.type==='touchend';
+  if(g.mode==='h'){
+    const go=ok&&!g.edge&&(Math.abs(g.dx)>g.W*.28||(Math.abs(g.v)>.45&&Math.sign(g.v)===Math.sign(g.dx)&&Math.abs(g.dx)>30));
+    if(go){goTab(TABS[g.idx-Math.sign(g.dx)],g.dx);return}
+    const from=main.style.transform,op=main.style.opacity;main.style.transform='';main.style.opacity='';setInd(g.idx);
+    if(motion()&&from)main.animate([{transform:from,opacity:op||'1'},{transform:'none',opacity:1}],{duration:360,easing:'cubic-bezier(.2,.9,.3,1.15)'});
+  }else{
+    const from=appEl.style.transform;appEl.style.transform='';
+    if(motion()&&from)appEl.animate([{transform:from},{transform:'none'}],{duration:400,easing:'cubic-bezier(.2,.9,.3,1.1)'});
+    if(ok&&g.hit)refresh();else hidePtr();
+  }
+}
+document.addEventListener('touchend',gEnd);document.addEventListener('touchcancel',gEnd);
+function hidePtr(){
+  const from=ptr.style.transform;ptr.style.transform='';ptr.style.opacity='';ptr.classList.remove('armed','spin');
+  if(motion()&&from)ptr.animate([{transform:from,opacity:1},{transform:'translateY(-70px) scale(.5)',opacity:0}],{duration:260,easing:'ease-in'});
+}
+async function refresh(){
+  refreshing=true;ptr.classList.add('armed','spin');ptr.style.transform='translateY(16px)';ptr.style.opacity='1';buzz(10);
+  const t=Date.now();let upd=false;
+  try{if(swReg){await swReg.update();upd=!!(swReg.waiting||swReg.installing)}}catch(x){}
+  if(ghCfg()&&(db.meta.dirty||ghStat.err))ghSync();
+  await new Promise(r=>setTimeout(r,Math.max(0,750-(Date.now()-t))));
+  refreshing=false;hidePtr();if(!db)return;
+  shown={};render();
+  /* Neue Version: gleiche Rückfrage wie in den anderen Boxen */
+  if(upd){if(confirm('Eine neue Version der MyTankBox ist da. Jetzt neu laden?')){const w=swReg.waiting||swReg.installing;
+      const go=()=>saving.then(()=>w.postMessage('SKIP_WAITING'));if(w){if(w.state==='installed')go();else w.addEventListener('statechange',()=>{if(w.state==='installed')go()})}}}
+  else toast('Alles aktuell. Werte sind neu berechnet.');
+}
+
+/* Kippen & Glanz über den Lagesensor */
+let tgt=[0,0],cur=[0,0],base=null,traf=0,tiltOn=false;
+addEventListener('deviceorientation',e=>{
+  if(!db||!motion()||e.beta==null||e.gamma==null||document.hidden)return;
+  const g=e.gamma,b=e.beta;
+  if(!base)base=[g,b];
+  base[0]+=(g-base[0])*.02;base[1]+=(b-base[1])*.02; // passt sich langsam an die Haltung an
+  tgt=[clamp((g-base[0])/14,-1,1),clamp((b-base[1])/14,-1,1)];
+  if(!tiltOn){tiltOn=true;document.documentElement.classList.add('tilt')}
+  if(!traf)traf=requestAnimationFrame(tstep);
+});
+function tstep(){traf=0;
+  cur[0]+=(tgt[0]-cur[0])*.16;cur[1]+=(tgt[1]-cur[1])*.16;
+  const st=document.documentElement.style;
+  st.setProperty('--tx',cur[0].toFixed(3));st.setProperty('--ty',cur[1].toFixed(3));st.setProperty('--gm',Math.min(1,Math.hypot(cur[0],cur[1])*1.5).toFixed(3));
+  if(Math.abs(tgt[0]-cur[0])+Math.abs(tgt[1]-cur[1])>.004)traf=requestAnimationFrame(tstep);
+}
+
 /* ---------- Start ---------- */
 document.getElementById('menuBtn').onclick=()=>openMenu();
-document.getElementById('fab').onclick=()=>openForm(null,true);
-document.querySelectorAll('nav.tabs [data-tab]').forEach(b=>b.onclick=()=>goTab(b.dataset.tab));
+document.getElementById('menuBtn').addEventListener('click',()=>setFan(false));
 if(IS_TEST){document.title='MyTankBox TEST';const h=document.querySelector('.brand h1');if(h)h.insertAdjacentHTML('beforeend',' <span class="testtag">TEST</span>')}
 (async()=>{
   await load();await loadKeys();render();askPersist();

@@ -1,6 +1,16 @@
-# MyTankBox – Test-App 0.1.0.1
+# MyTankBox – Test-App 0.2.0.1
 
 Tankungen des Dienstwagens mit Quittungsfoto erfassen, Verbrauch und Kosten auswerten. Alle Daten bleiben auf dem Handy. Es gibt keinen Server. Einzige mögliche Verbindungen: die optionale automatische Sicherung in dein eigenes privates GitHub-Repo und das App-Update in das App-Repo.
+
+## Neu in 0.2 – Gesten & Bewegung wie in der MyBelegBox
+
+- Links/rechts wischen wechselt zwischen Übersicht, Tankungen und Auswertung.
+- Oben auf der Seite nach unten ziehen: Werte neu berechnen, nach Updates suchen und eine fällige GitHub-Sicherung anstoßen.
+- „Tanken“ öffnet einen Fächer: „Quittung fotografieren“ oder „Ohne Foto eintragen“. Beim Scrollen schrumpft der Knopf zum Kreis.
+- Verbrauch, Kosten und km-Stand zählen in der Übersicht hoch.
+- Leichtes Kippen mit Glanz über den Lagesensor (Übersicht, Verbrauch und Quittungsfoto in der Detailansicht), kurzes Vibrieren bei Aktionen.
+- Detail- und Formularfenster lassen sich am Griff oder von oben nach unten wegziehen, die Zurück-Taste schließt Fächer und Fenster.
+- Wer in Android „Animationen entfernen“ eingeschaltet hat, bekommt die ruhige Version ohne Effekte.
 
 ## Neu in 0.1
 

@@ -238,7 +238,7 @@ nav.tabs button[aria-current="page"] svg{animation:pop .45s var(--spring)}
 .fab.open .plus{transform:rotate(135deg)}
 .fab.open .lbl{max-width:0;margin-left:0;opacity:0}
 .fan{position:fixed;inset:0;z-index:22}
-.fan .fs{position:absolute;inset:0;background:rgba(5,15,12,.32);opacity:0;transition:opacity .22s}
+.fan .fs{position:absolute;inset:0;background:rgba(25,12,4,.32);opacity:0;transition:opacity .22s}
 .fan.show .fs{opacity:1}
 .fan .fi{position:absolute;right:max(18px, calc(env(safe-area-inset-right,0px) + 18px));bottom:calc(142px + env(safe-area-inset-bottom,0px));
   display:flex;flex-direction:column;align-items:flex-end;gap:10px}
@@ -775,7 +775,14 @@ label.btn{display:inline-flex;align-items:center;gap:6px;cursor:pointer}
 <div id="toastRoot"></div>
 <div id="updRoot"></div>
 
-<button class="fab" id="fab" type="button" aria-label="Neue Tankung"><svg class="plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg><span class="lbl">Tanken</span></button>
+<div class="ptr" id="ptr" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.4-5.7"/><path d="M20 4v4.5h-4.5"/></svg></div>
+
+<div class="fan" id="fan" hidden><div class="fs"></div><div class="fi">
+  <button type="button" data-neu="foto" style="--n:1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13.5" r="3.5"/></svg>Quittung fotografieren</button>
+  <button type="button" data-neu="hand" style="--n:0"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16z"/><path d="M13.5 6.5l4 4"/></svg>Ohne Foto eintragen</button>
+</div></div>
+
+<button class="fab" id="fab" type="button" aria-expanded="false" aria-controls="fan" aria-label="Neue Tankung"><svg class="plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg><span class="lbl">Tanken</span></button>
 
 <nav class="tabs" aria-label="Bereiche"><div class="in">
   <span class="ind" aria-hidden="true"></span>
