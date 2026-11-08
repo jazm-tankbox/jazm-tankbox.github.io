@@ -1,0 +1,23 @@
+{
+  "name": "MyTankBox",
+  "short_name": "MyTankBox",
+  "description": "Tankungen, Verbrauch und Kosten des Dienstwagens – auf deinem Handy.",
+  "lang": "de",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#F3EFEB",
+  "theme_color": "#B4530F",
+  "categories": ["finance", "productivity"],
+  "shortcuts": [
+    { "name": "Neue Tankung", "short_name": "Tanken", "url": "./?aktion=neu", "icons": [{ "src": "icons/tankbox-192.png", "sizes": "192x192" }] }
+  ],
+  "icons": [
+    { "src": "icons/tankbox-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/tankbox-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/tankbox-maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "icons/tankbox-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

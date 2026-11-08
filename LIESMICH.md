@@ -1,0 +1,55 @@
+# MyTankBox – Test-App 0.1.0.1
+
+Tankungen des Dienstwagens mit Quittungsfoto erfassen, Verbrauch und Kosten auswerten. Alle Daten bleiben auf dem Handy. Es gibt keinen Server. Einzige mögliche Verbindungen: die optionale automatische Sicherung in dein eigenes privates GitHub-Repo und das App-Update in das App-Repo.
+
+## Neu in 0.1
+
+- **Tankung erfassen**: „Tanken“ öffnet direkt die Kamera für die Quittung. Datum, Uhrzeit, Kilometerstand, Liter, Betrag, Kraftstoff, Tankstelle, Volltank (Standard an) und Notiz. Der Preis pro Liter wird berechnet, wenn er leer bleibt.
+- **Plausibilitätsprüfung**: Hinweise, wenn Liter × Preis nicht zum Betrag passt, der km-Stand nicht höher ist als beim letzten Tanken oder der Verbrauch unrealistisch wirkt. Speichern geht trotzdem (zweimal tippen).
+- **Übersicht**: Durchschnittsverbrauch (Volltank-Methode), Kosten im laufenden Jahr, Kosten pro 100 km, aktueller km-Stand, letzte Tankungen.
+- **Tankungen**: nach Monaten mit Summen, Detail mit Foto, Bearbeiten und Löschen.
+- **Auswertung**: Kosten der letzten 12 Monate, Verbrauch je Tankung (auffällige orange), bezahlter Preis pro Liter.
+- **Automatische Sicherung (GitHub)** und **App-Update aus der App** wie in den anderen Boxen.
+- **Sicherungsdatei** (`.tankbox`, mit Fotos) und **CSV-Export** für Excel bzw. die Abrechnung.
+- Darstellung hell/dunkel/automatisch, Punkt am Menü-Knopf für den Sicherungsstand, „Meine Boxen“ mit allen vier Boxen.
+
+Noch nicht enthalten: automatisches Auslesen der Quittung (folgt als nächstes, kostenlos offline) und der Import der alten Excel-Daten.
+
+## Erstmals online stellen
+
+1. Auf GitHub eine Organisation **jazm-tankbox** anlegen (wie bei der Belegbox) und darin das Repo **jazm-tankbox.github.io** (öffentlich, damit GitHub Pages kostenlos läuft).
+2. Den gesamten Inhalt dieser Zip **einmal entpackt** hochladen („Add file → Upload files“), inklusive des Ordners `.github` (enthält `workflows/paket.yml`). Tipp: Der Ordner `.github` ist am Handy oft versteckt – notfalls die Datei `paket.yml` über „Add file → Create new file“ mit dem Namen `.github/workflows/paket.yml` anlegen und den Inhalt hineinkopieren.
+3. Settings → Pages → Branch `main`, Ordner `/` → Save. Nach 1–2 Minuten läuft die App unter https://jazm-tankbox.github.io
+4. Settings → Actions → General → „Workflow permissions“ auf **Read and write** stellen.
+5. Am Handy in Chrome öffnen → Menü → „App installieren“.
+
+Test-App: denselben Inhalt in einen Unterordner `test/` legen. Sie hat einen eigenen Speicher und zeigt „TEST“.
+
+## App-Update aus der App
+
+Daten → **App-Update**: einmal das App-Repo (`jazm-tankbox/jazm-tankbox.github.io`) und einen eigenen Fine-grained-Zugangsschlüssel eintragen – nur für dieses Repo, Rechte **Contents: Read and write** und **Actions: Read**. Danach „Update-Zip hochladen“ und das Paket wählen. Der Ablauf `.github/workflows/paket.yml` entpackt die Zip, prüft, dass `APP_VERSION` (app.js) und Cache-Nummer (sw.js) übereinstimmen und die Version nicht älter ist, übernimmt die Dateien, löscht die Zip und veröffentlicht. Die App meldet, sobald die neue Version online ist.
+
+## Automatische Sicherung (GitHub)
+
+Daten → Datensicherung → „GitHub einrichten“: Konto, **privates** Repo (Vorschlag `jazm-tankbox/tankbox-daten`), optional ein Ordner und ein Fine-grained-Zugangsschlüssel (nur dieses Repo, „Contents: Read and write“). Nach jeder Änderung landen `daten.json` (alle Tankungen) und `fotos/<id>.jpg` im Repo. Jede Sicherung ist ein Commit. Öffentliche Repos werden abgelehnt, ein fremder Datenstand wird nie automatisch überschrieben, im Repo wird nichts gelöscht. Du kannst auch das Sicherungs-Repo der anderen Boxen nehmen und als Ordner `tankbox` eintragen.
+
+Neues Handy: GitHub einrichten → liegt im Repo schon eine Sicherung und ist die App noch leer, holt sie alles automatisch zurück.
+
+Anders als in der Belegbox gibt es hier kein Passwort und keine Verschlüsselung, damit das Erfassen an der Säule schnell geht. Die Zugangsschlüssel liegen nur auf dem Handy und kommen in keine Sicherung.
+
+## Neue Version veröffentlichen
+
+1. In `sw.js` die Nummer in `CACHE = 'tankbox-…'` erhöhen.
+2. In `app.js` `APP_VERSION` auf dieselbe Nummer setzen.
+3. Zip über „App-Update“ hochladen.
+
+## Dateien
+
+| Datei | Zweck |
+|---|---|
+| `index.html` | Seite und Gestaltung |
+| `app.js` | gesamte App-Logik |
+| `ds.js` | gemeinsamer Baustein aller Boxen (jetzt mit MyTankBox in „Meine Boxen“) |
+| `sw.js` | Service Worker (offline nutzbar, Update-Hinweis) |
+| `manifest.webmanifest` | Name, Farben, Icons |
+| `.github/workflows/paket.yml` | übernimmt Update-Zips automatisch |
