@@ -1,6 +1,6 @@
 (function(){
 'use strict';
-const APP_VERSION='0.2.0.1';
+const APP_VERSION='0.3.0.1';
 /* Eigener Speicher je Adresse: die Live-App unter / behält ihre Namen, eine Test-App unter /test/ bekommt eigene */
 const BASE=location.pathname.replace(/[^/]*$/,'');
 const NS=BASE==='/'?'':BASE.replace(/^\/|\/$/g,'').replace(/[^a-z0-9]+/gi,'-').toLowerCase()+'-';
@@ -53,7 +53,7 @@ const fotoGet=id=>st('fotos','readonly',s=>s.get(id)),fotoPut=(id,b)=>st('fotos'
   fotoDel=id=>st('fotos','readwrite',s=>s.delete(id)),fotoKeys=()=>st('fotos','readonly',s=>s.getAllKeys()),fotoClear=()=>st('fotos','readwrite',s=>s.clear());
 
 let db=null;
-const empty=()=>({v:1,did:uid(),fills:[],meta:{}});
+const empty=()=>({v:1,did:uid(),fills:[],services:[],meta:{}});
 const dbOk=o=>!!(o&&Array.isArray(o.fills));
 async function load(){
   let a=null,b=null;
@@ -61,7 +61,7 @@ async function load(){
   try{const m=await kvGet('daten');b=m?JSON.parse(m):null}catch(e){}
   const ta=dbOk(a)?a.saved||0:-1,tb=dbOk(b)?b.saved||0:-1;
   db=ta<0&&tb<0?empty():tb>ta?b:a;
-  if(!db.did)db.did=uid();db.meta=db.meta||{};
+  if(!db.did)db.did=uid();db.meta=db.meta||{};if(!Array.isArray(db.services))db.services=[];
   if(tb>ta&&ta>=0)setTimeout(()=>toast('Die Daten wurden aus der Zweitkopie wiederhergestellt.'),800);
 }
 let saving=Promise.resolve();
@@ -105,9 +105,10 @@ function stats(){
   const y=String(new Date().getFullYear()),ym=iso(new Date()).slice(0,7);
   const yearF=db.fills.filter(f=>f.datum.startsWith(y)),monF=db.fills.filter(f=>f.datum.startsWith(ym));
   const sum=a=>a.reduce((t,f)=>t+(+f.betrag||0),0);
+  const svY=db.services.filter(v=>v.datum.startsWith(y)).reduce((t,v)=>t+(+v.betrag||0),0),waY=yearF.reduce((t,f)=>t+(+f.waesche||0),0);
   const kmAll=s.length>1?s[s.length-1].km-s[0].km:0;
   const costAll=s.length>1?s.slice(1).reduce((t,f)=>t+(+f.betrag||0),0):0;
-  return {c,avg:dist>0?lit/dist*100:null,year:sum(yearF),yearN:yearF.length,month:sum(monF),monthN:monF.length,
+  return {c,avg:dist>0?lit/dist*100:null,year:sum(yearF)+svY+waY,yearX:svY+waY,yearN:yearF.length,month:sum(monF),monthN:monF.length,
     kmNow:s.length?s[s.length-1].km:null,per100:kmAll>0?costAll/kmAll*100:null,
     kmYear:(()=>{const ys=s.filter(f=>f.datum.startsWith(y));const before=s.filter(f=>f.datum<y+'-01-01');const start=before.length?before[before.length-1].km:(ys[0]&&ys[0].km);return ys.length&&start!=null?ys[ys.length-1].km-start:0})()}
 }
@@ -160,7 +161,7 @@ function ghStatusText(){
   return 'Noch nicht gesichert.';
 }
 /* Was gesichert wird: die Daten ohne Zähler und Zeitstempel, damit unveränderte Stände nicht neu hochgeladen werden */
-const payload=()=>JSON.stringify({app:'tankbox',format:1,version:APP_VERSION,did:db.did,fills:byDate()},null,1);
+const payload=()=>JSON.stringify({app:'tankbox',format:1,version:APP_VERSION,did:db.did,fills:byDate(),services:svcByDate()},null,1);
 async function ghRemote(g){
   const cur=await ghFetch(g,'GET','/contents/daten.json');if(!cur)return {cur:null,json:null};
   let json=null;
@@ -174,7 +175,7 @@ async function ghSync(force){
   ghBusy=true;clearTimeout(ghTimer);ghTimer=0;setGhStat({});
   try{
     // 1) Fotos, die im Repo noch fehlen (Fotos ändern sich nie, daher reicht der Name)
-    const ids=db.fills.map(f=>f.foto).filter(Boolean);
+    const ids=allEntries().map(f=>f.foto).filter(Boolean);
     if(ids.length){
       const list=await ghFetch(g,'GET','/contents/fotos');const have=new Set((list||[]).map(x=>String(x.name).replace(/\.jpg$/,'')));
       for(const id of ids){if(have.has(id))continue;const b=await fotoGet(id).catch(()=>null);if(!b)continue;
@@ -208,17 +209,17 @@ document.addEventListener('visibilitychange',()=>{if(document.hidden&&ghTimer)gh
 async function ghRestore(g,onStep){
   const {json}=await ghRemote(g);let o=null;try{o=JSON.parse(json)}catch(e){}
   if(!o||o.app!=='tankbox'||!Array.isArray(o.fills))throw new Error('Im Repo wurde keine MyTankBox-Sicherung gefunden.');
-  const need=o.fills.map(f=>f.foto).filter(Boolean);let n=0;
+  const need=o.fills.concat(o.services||[]).map(f=>f.foto).filter(Boolean);let n=0;
   for(const id of need){onStep&&onStep(++n,need.length);if(await fotoGet(id).catch(()=>null))continue;
     const b=await ghFetch(g,'GET','/contents/fotos/'+encodeURIComponent(id)+'.jpg',null,true).catch(()=>null);
     if(b)await fotoPut(id,new Blob([b],{type:'image/jpeg'}))}
-  db={v:1,did:o.did||uid(),fills:o.fills,meta:Object.assign({},db.meta,{dirty:0,lastBackup:iso(new Date())})};
+  db={v:1,did:o.did||uid(),fills:o.fills,services:Array.isArray(o.services)?o.services:[],meta:Object.assign({},db.meta,{dirty:0,lastBackup:iso(new Date())})};
   await save(false);
 }
 
 /* ---------- Sicherungsdatei (zusätzlich oder statt GitHub) ---------- */
 async function exportBackup(){
-  const fotos={};for(const f of db.fills){if(!f.foto)continue;const b=await fotoGet(f.foto).catch(()=>null);if(b)fotos[f.foto]=toB64(await b.arrayBuffer())}
+  const fotos={};for(const f of allEntries()){if(!f.foto)continue;const b=await fotoGet(f.foto).catch(()=>null);if(b)fotos[f.foto]=toB64(await b.arrayBuffer())}
   const o=JSON.parse(payload());o.exported=new Date().toISOString();o.fotos=fotos;
   const ok=await deliverFile('tankbox-sicherung-'+iso(new Date())+'.tankbox',JSON.stringify(o),'application/json');
   if(ok){db.meta.dirty=0;db.meta.lastBackup=iso(new Date());await save(false,false);bkDot();toast('Sicherung erstellt.')}
@@ -229,8 +230,8 @@ async function readBackupFile(file){
   return o}
 async function restoreBackup(o){
   for(const [id,b64] of Object.entries(o.fotos||{}))await fotoPut(id,new Blob([fromB64(b64)],{type:'image/jpeg'}));
-  db={v:1,did:o.did||uid(),fills:o.fills,meta:Object.assign({},db.meta,{dirty:0,lastBackup:iso(new Date())})};
-  await save(false);closeSheet(false);render();celebrate('Wiederhergestellt');toast(o.fills.length+' Tankungen geladen.')}
+  db={v:1,did:o.did||uid(),fills:o.fills,services:Array.isArray(o.services)?o.services:[],meta:Object.assign({},db.meta,{dirty:0,lastBackup:iso(new Date())})};
+  await save(false);closeSheet(false);render();celebrate('Wiederhergestellt');toast(o.fills.length+' Tankungen'+(db.services.length?' und '+db.services.length+' Service-Einträge':'')+' geladen.')}
 async function deliverFile(name,text,type){
   const blob=new Blob([text],{type});
   try{const file=new File([blob],name,{type});if(navigator.canShare&&navigator.canShare({files:[file]})){await navigator.share({files:[file],title:name});return true}}
@@ -239,9 +240,11 @@ async function deliverFile(name,text,type){
   setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},2000);return true}
 function exportCsv(){
   const c=calc(),q=v=>'"'+String(v??'').replace(/"/g,'""')+'"',n=(v,d)=>v==null||v===''||isNaN(v)?'':Number(v).toFixed(d).replace('.',',');
-  const rows=[['Datum','Uhrzeit','Kilometerstand','Liter','Preis pro Liter','Betrag','Kraftstoff','Tankstelle','Volltank','Gefahrene km','Verbrauch l/100km','Notiz'].map(q).join(';')];
-  byKm().forEach(f=>{const x=c[f.id]||{};rows.push([q(fmtS(f.datum)),q(f.zeit||''),n(f.km,0),n(f.liter,2),n(f.ppl,3),n(f.betrag,2),q(f.sorte||''),q(f.station||''),q(f.voll===false?'nein':'ja'),n(x.dist,0),n(x.verb,2),q(f.notiz||'')].join(';'))});
-  return deliverFile('tankungen-'+iso(new Date())+'.csv','﻿'+rows.join('\r\n'),'text/csv')}
+  const rows=[['Typ','Datum','Uhrzeit','Kilometerstand','Liter / Menge','Preis pro Liter','Betrag','Autowäsche','Kraftstoff / Art','Ort','Volltank','Gefahrene km','Verbrauch l/100km','Nächste fällig','Notiz'].map(q).join(';')];
+  const all=byKm().map(f=>({k:f.datum+(f.zeit||''),r:()=>{const x=c[f.id]||{};return [q('Tankung'),q(fmtS(f.datum)),q(f.zeit||''),n(f.km,0),n(f.liter,2),n(f.ppl,3),n(f.betrag,2),n(f.waesche,2),q(f.sorte||''),q(f.station||''),q(f.voll===false?'nein':'ja'),n(x.dist,0),n(x.verb,2),'',q(f.notiz||'')]}}))
+    .concat(db.services.map(v=>({k:v.datum+'~',r:()=>[q(svcName(v)),q(fmtS(v.datum)),'',n(v.km,0),n(v.menge,1),'',n(v.betrag,2),'',q(svcDetail(v)),q(v.ort||''),'','','',q(nextText(v)),q(v.notiz||'')]})));
+  all.sort((a,b)=>a.k.localeCompare(b.k)).forEach(x=>rows.push(x.r().join(';')));
+  return deliverFile('tankbox-'+iso(new Date())+'.csv','﻿'+rows.join('\r\n'),'text/csv')}
 
 /* ---------- Sheet (wie in den anderen Boxen) ---------- */
 const root=document.getElementById('sheetRoot');
@@ -323,8 +326,9 @@ function bkDot(){const b=document.getElementById('menuBtn');if(!b||!db)return;co
 function fillRow(f,c,i){const x=c[f.id]||{};const d=parse(f.datum);
   return `<button type="button" class="row" data-fill="${f.id}" style="--j:${i||0}"><span class="date"><b>${d.getDate()}</b><span>${MON[d.getMonth()].slice(0,3)}</span></span>
     <span class="main"><span class="t">${nf(f.liter,2)} l${f.sorte?' · '+esc(f.sorte):''}</span><span class="s">${km(f.km)}${f.station?' · '+esc(f.station):''}${f.voll===false?' · teilweise':''}</span>
+    ${f.waesche?`<span class="s">inkl. Autowäsche ${eur(f.waesche)}</span>`:''}
     ${x.verb!=null?`<span class="s">${nf(x.verb,1)} l/100 km auf ${km(x.seit)}</span>`:''}</span>
-    <span class="ramt"><span class="amt num">${eur(f.betrag)}</span>${f.ppl?`<small class="muted num">${nf(f.ppl,3)} €/l</small>`:''}${f.foto?`<small class="muted" aria-label="mit Foto">${svg('cam','mini-ic')}</small>`:''}</span></button>`}
+    <span class="ramt"><span class="amt num">${eur(fillCost(f))}</span>${f.ppl?`<small class="muted num">${nf(f.ppl,3)} €/l</small>`:''}${f.foto?`<small class="muted" aria-label="mit Foto">${svg('cam','mini-ic')}</small>`:''}</span></button>`}
 let first=true;
 function render(){
   if(!db)return;bkDot();
@@ -333,14 +337,16 @@ function render(){
   const s=stats();
   if(tab==='home')main.innerHTML=viewHome(s);else if(tab==='liste')main.innerHTML=viewList(s);else main.innerHTML=viewStats(s);
   main.querySelectorAll('[data-fill]').forEach(b=>b.onclick=()=>openDetail(b.dataset.fill));
+  main.querySelectorAll('[data-svc]').forEach(b=>b.onclick=()=>openSvcDetail(b.dataset.svc));
+  main.querySelectorAll('[data-due]').forEach(b=>b.onclick=()=>openSvcForm(null,b.dataset.due));
   const rm=main.querySelector('[data-bk]');if(rm)rm.onclick=()=>openMenu('gh');
   const nb=main.querySelector('[data-new]');if(nb)nb.onclick=()=>openForm(null,nb.dataset.new==='foto');
   const all=main.querySelector('[data-all]');if(all)all.onclick=()=>goTab('liste');
   countUps(first);first=false;
 }
 function viewHome(s){
-  const recent=byDate().slice(0,4);
-  if(!db.fills.length)return `<section class="view">
+  const recent=timeline().slice(0,5);
+  if(!db.fills.length&&!db.services.length)return `<section class="view">
     <div class="summary"><div><div class="label">Willkommen</div><p style="margin:6px 0 0">Erfasse jede Tankung des Dienstwagens mit Quittungsfoto. Die MyTankBox rechnet Verbrauch und Kosten aus.</p></div>
     <div class="actions"><button type="button" class="btn primary" data-new="foto">Erste Tankung erfassen</button></div></div>
     ${ghCfg()?'':`<p class="hint">Neues Handy? Unter <b>Daten</b> → Datensicherung → „GitHub einrichten“ holst du deine Tankungen aus GitHub zurück.</p>`}</section>`;
@@ -348,24 +354,27 @@ function viewHome(s){
     <div class="summary">
       <div><div class="label">Durchschnittsverbrauch</div><div class="bigcost"><span class="num"${s.avg!=null?` data-count="avg" data-v="${s.avg}" data-f="l1"`:''}>${s.avg!=null?nf(s.avg,1):'–'}</span><small>l/100 km${s.avg==null?' · ab zwei vollen Tankungen':''}</small></div></div>
       <div class="facts">
-        <div class="fact"><b class="num" data-count="year" data-v="${s.year}" data-f="eur0">${eur0(s.year)}</b><span>Kosten ${new Date().getFullYear()}<br><small>${s.yearN} Tankung${s.yearN===1?'':'en'}</small></span></div>
-        <div class="fact"><b class="num"${s.per100!=null?` data-count="p100" data-v="${s.per100}" data-f="eur"`:''}>${s.per100!=null?eur(s.per100):'–'}</b><span>pro 100 km</span></div>
+        <div class="fact"><b class="num" data-count="year" data-v="${s.year}" data-f="eur0">${eur0(s.year)}</b><span>Kosten ${new Date().getFullYear()}<br><small>${s.yearN} Tankung${s.yearN===1?'':'en'}${s.yearX?'<br>inkl. '+eur0(s.yearX)+' Extras':''}</small></span></div>
+        <div class="fact"><b class="num"${s.per100!=null?` data-count="p100" data-v="${s.per100}" data-f="eur"`:''}>${s.per100!=null?eur(s.per100):'–'}</b><span>Sprit pro 100 km</span></div>
         <div class="fact"><b class="num"${s.kmNow!=null?` data-count="km" data-v="${s.kmNow}" data-f="n0"`:''}>${s.kmNow!=null?nf(s.kmNow,0):'–'}</b><span>km-Stand</span></div>
       </div></div>
-    <div><div class="sechead"><h2>Letzte Tankungen</h2><button type="button" class="ghost" data-all>Alle ${db.fills.length}</button></div>
-      <div class="list" style="margin-top:10px">${recent.map((f,i)=>fillRow(f,s.c,i)).join('')}</div></div>
+    ${dueHtml()}
+    <div><div class="sechead"><h2>Zuletzt</h2><button type="button" class="ghost" data-all>Alle ${allEntries().length}</button></div>
+      <div class="list" style="margin-top:10px">${recent.map((f,i)=>entryRow(f,s.c,i)).join('')}</div></div>
   </section>`}
 function viewList(s){
-  if(!db.fills.length)return `<section class="view"><div class="list"><div class="empty">Noch keine Tankungen.</div></div></section>`;
-  const groups={};byDate().forEach(f=>{(groups[f.datum.slice(0,7)]=groups[f.datum.slice(0,7)]||[]).push(f)});
+  const tl=timeline();
+  if(!tl.length)return `<section class="view"><div class="list"><div class="empty">Noch keine Einträge.</div></div></section>`;
+  const groups={};tl.forEach(f=>{(groups[f.datum.slice(0,7)]=groups[f.datum.slice(0,7)]||[]).push(f)});
   return `<section class="view">${Object.entries(groups).map(([ym,fs])=>{const [y,m]=ym.split('-').map(Number);
-    return `<div><div class="sechead"><h2>${MON[m-1]} ${y}</h2><span class="count num">${eur(fs.reduce((a,f)=>a+(+f.betrag||0),0))} · ${nf(fs.reduce((a,f)=>a+(+f.liter||0),0),1)} l</span></div>
-      <div class="list" style="margin-top:10px">${fs.map((f,i)=>fillRow(f,s.c,i)).join('')}</div></div>`}).join('')}</section>`}
+    const lit=fs.filter(f=>!f.typ).reduce((a,f)=>a+(+f.liter||0),0);
+    return `<div><div class="sechead"><h2>${MON[m-1]} ${y}</h2><span class="count num">${eur(fs.reduce((a,f)=>a+cost(f),0))}${lit?' · '+nf(lit,1)+' l':''}</span></div>
+      <div class="list" style="margin-top:10px">${fs.map((f,i)=>entryRow(f,s.c,i)).join('')}</div></div>`}).join('')}</section>`}
 function viewStats(s){
-  if(db.fills.length<2)return `<section class="view"><div class="list"><div class="empty">Auswertungen gibt es ab zwei Tankungen.</div></div></section>`;
+  if(allEntries().length<2)return `<section class="view"><div class="list"><div class="empty">Auswertungen gibt es ab zwei Einträgen.</div></div></section>`;
   // Kosten der letzten 12 Monate
   const now=new Date(),months=[];for(let i=11;i>=0;i--){const d=new Date(now.getFullYear(),now.getMonth()-i,1);months.push(iso(d).slice(0,7))}
-  const mc=months.map(ym=>({ym,v:db.fills.filter(f=>f.datum.startsWith(ym)).reduce((a,f)=>a+(+f.betrag||0),0)}));
+  const mc=months.map(ym=>({ym,v:allEntries().filter(f=>f.datum.startsWith(ym)).reduce((a,f)=>a+cost(f),0)}));
   const mx=Math.max(1,...mc.map(x=>x.v));
   const fulls=byKm().filter(f=>s.c[f.id]&&s.c[f.id].verb!=null).slice(-10).reverse();
   const vmx=Math.max(1,...fulls.map(f=>s.c[f.id].verb));
@@ -373,7 +382,8 @@ function viewStats(s){
   return `<section class="view">
     <div class="summary"><div class="label">Kosten der letzten 12 Monate</div>
       <div class="bars">${mc.map(x=>{const [y,m]=x.ym.split('-').map(Number);return `<div class="bar"><span class="bl">${MON[m-1].slice(0,3)} ${String(y).slice(2)}</span><span class="track"><span class="fill" style="width:${(x.v/mx*100).toFixed(1)}%"></span></span><span class="num">${x.v?eur(x.v):'–'}</span></div>`}).join('')}</div>
-      <p class="hint">Summe: ${eur(mc.reduce((a,x)=>a+x.v,0))}${s.kmYear?' · '+km(s.kmYear)+' gefahren in '+now.getFullYear():''}</p></div>
+      <p class="hint">Summe inkl. Wäsche und Service: ${eur(mc.reduce((a,x)=>a+x.v,0))}${s.kmYear?' · '+km(s.kmYear)+' gefahren in '+now.getFullYear():''}</p></div>
+    ${breakdownHtml()}
     <div class="summary"><div class="label">Verbrauch je Tankung</div>
       ${fulls.length?`<div class="bars">${fulls.map(f=>{const v=s.c[f.id].verb;return `<div class="bar"><span class="bl">${fmtS(f.datum).slice(0,6)}</span><span class="track"><span class="fill" style="width:${(v/vmx*100).toFixed(1)}%${s.avg&&v>s.avg*1.2?';background:var(--warn)':''}"></span></span><span class="num">${nf(v,1)} l</span></div>`}).join('')}</div>
       <p class="hint">l/100 km zwischen zwei vollen Tankungen. Orange: über 20 % mehr als der Durchschnitt (${s.avg!=null?nf(s.avg,1):'–'} l).</p>`:'<p class="hint">Sobald zwei volle Tankungen da sind, steht hier der Verbrauch.</p>'}</div>
@@ -392,7 +402,8 @@ async function openDetail(id){
     <dl class="kv">
       <dt>Kilometerstand</dt><dd class="num">${km(f.km)}${x.dist!=null?` <span class="muted">(+${nf(x.dist,0)})</span>`:''}</dd>
       <dt>Getankt</dt><dd class="num">${nf(f.liter,2)} l${f.voll===false?' · teilweise':' · voll'}</dd>
-      <dt>Betrag</dt><dd class="num">${eur(f.betrag)}</dd>
+      <dt>Kraftstoff-Betrag</dt><dd class="num">${eur(f.betrag)}</dd>
+      ${f.waesche?`<dt>Autowäsche</dt><dd class="num">${eur(f.waesche)}</dd><dt>Quittung gesamt</dt><dd class="num"><b>${eur(fillCost(f))}</b></dd>`:''}
       <dt>Preis pro Liter</dt><dd class="num">${f.ppl?nf(f.ppl,3)+' €':'–'}</dd>
       <dt>Kraftstoff</dt><dd>${esc(f.sorte||'–')}</dd>
       <dt>Tankstelle</dt><dd>${esc(f.station||'–')}</dd>
@@ -403,6 +414,169 @@ async function openDetail(id){
     s.querySelector('#dDel').onclick=async()=>{if(!confirm('Diese Tankung löschen? Das Foto wird auf diesem Handy ebenfalls entfernt.'))return;
       db.fills=db.fills.filter(y=>y.id!==f.id);if(f.foto)fotoDel(f.foto).catch(()=>{});await save();closeSheet();render();toast('Tankung gelöscht.')};
     const img=s.querySelector('.photo');if(img)img.onclick=()=>window.open(url,'_blank')});
+}
+
+/* ---------- Service: AdBlue, Reifen, Inspektion, TÜV, Panne ---------- */
+const SVC={
+  adblue:{n:'AdBlue',ic:'<path d="M12 3s6 6.5 6 11a6 6 0 0 1-12 0c0-4.5 6-11 6-11z"/>'},
+  reifen:{n:'Reifenwechsel',ic:'<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3"/><path d="M12 3.5v5.5M12 15v5.5M3.5 12H9M15 12h5.5"/>'},
+  inspektion:{n:'Inspektion',ic:'<path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L4 17l3 3 5.3-5.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.4-.6-.6-2.4z"/>'},
+  tuev:{n:'TÜV / HU',ic:'<circle cx="12" cy="10" r="6"/><path d="M9.5 10l2 2 3.5-3.5M8.5 15.5L7 21l5-2 5 2-1.5-5.5"/>'},
+  panne:{n:'Panne',ic:'<path d="M12 3l9.5 17h-19z"/><path d="M12 10v4.5M12 17.5v.2"/>'},
+  sonst:{n:'Sonstiges',ic:'<circle cx="12" cy="12" r="8.5"/><path d="M8 12h8M12 8v8"/>'}};
+const REIFEN=['Winterreifen drauf','Sommerreifen drauf','Ganzjahresreifen drauf','Neue Reifen'];
+const svcIco=(t,c='')=>`<svg class="${c}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${(SVC[t]||SVC.sonst).ic}</svg>`;
+const svcName=v=>v.typ==='sonst'&&v.titel?v.titel:(SVC[v.typ]||SVC.sonst).n;
+const svcByDate=()=>db.services.slice().sort((a,b)=>b.datum.localeCompare(a.datum)||((b.km||0)-(a.km||0)));
+const allEntries=()=>db.fills.concat(db.services);
+const fillCost=f=>(+f.betrag||0)+(+f.waesche||0);
+const cost=e=>e.typ?(+e.betrag||0):fillCost(e);
+/* Gemeinsame Zeitleiste, neueste zuerst */
+const timeline=()=>allEntries().slice().sort((a,b)=>(b.datum+(b.zeit||'~')).localeCompare(a.datum+(a.zeit||'~'))||((b.km||0)-(a.km||0)));
+function svcDetail(v){
+  if(v.typ==='adblue')return v.menge?nf(v.menge,1)+' l':'';
+  if(v.typ==='reifen')return v.reifen||'';
+  return v.typ==='sonst'?'':(v.titel||'');
+}
+const ymText=s=>{if(!s)return '';const [y,m]=s.split('-').map(Number);return MON[m-1]+' '+y};
+function nextText(v){const a=[];
+  if(v.typ==='tuev'&&v.next)a.push(ymText(v.next));
+  if(v.typ==='inspektion'){if(v.next)a.push(fmtS(v.next));if(v.nextKm)a.push(km(v.nextKm))}
+  return a.join(' oder ')}
+function entryRow(e,c,i){return e.typ?svcRow(e,i):fillRow(e,c,i)}
+function svcRow(v,i){const d=parse(v.datum),det=svcDetail(v);
+  return `<button type="button" class="row svc" data-svc="${v.id}" style="--j:${i||0}"><span class="date sv">${svcIco(v.typ)}<span>${d.getDate()}. ${MON[d.getMonth()].slice(0,3)}</span></span>
+    <span class="main"><span class="t">${esc(svcName(v))}${det?' · '+esc(det):''}</span><span class="s">${v.km?km(v.km):''}${v.km&&v.ort?' · ':''}${esc(v.ort||'')}</span>
+    ${nextText(v)?`<span class="s">nächste fällig: ${esc(nextText(v))}</span>`:''}</span>
+    <span class="ramt">${v.betrag?`<span class="amt num">${eur(v.betrag)}</span>`:'<small class="muted">ohne Kosten</small>'}${v.foto?`<small class="muted" aria-label="mit Foto">${svg('cam','mini-ic')}</small>`:''}</span></button>`}
+
+/* Fällig: TÜV, Inspektion (Datum oder km), aktuelle Bereifung */
+function dueHtml(){
+  const last=t=>svcByDate().find(v=>v.typ===t);
+  const kmNow=(()=>{const a=allEntries().map(e=>+e.km||0);return a.length?Math.max(...a):null})();
+  const items=[];
+  const tv=last('tuev');
+  if(tv&&tv.next){const [y,m]=tv.next.split('-').map(Number);const end=new Date(y,m,0);const d=Math.round((end-T())/864e5);
+    items.push({t:'tuev',l:'TÜV / HU',v:ymText(tv.next),lvl:d<0?'crit':d<=45?'warn':'',s:d<0?'überfällig':d<=45?'in '+d+' Tagen':''})}
+  const ins=last('inspektion');
+  if(ins&&(ins.next||ins.nextKm)){let lvl='',sub=[];
+    if(ins.next){const d=daysAgo(ins.next)*-1;if(d<0)lvl='crit';else if(d<=30)lvl='warn';if(d<=30)sub.push(d<0?'Datum überschritten':'in '+d+' Tagen')}
+    if(ins.nextKm&&kmNow!=null){const r=ins.nextKm-kmNow;if(r<0)lvl='crit';else if(r<=1500&&lvl!=='crit')lvl='warn';sub.push(r<0?km(-r)+' drüber':'noch '+km(r))}
+    items.push({t:'inspektion',l:'Inspektion',v:nextText(ins),lvl,s:sub.join(' · ')})}
+  const rf=last('reifen');
+  if(rf&&rf.reifen&&rf.reifen!=='Neue Reifen'){const m=new Date().getMonth()+1;const sommer=rf.reifen.startsWith('Sommer'),winter=rf.reifen.startsWith('Winter');
+    const hint=sommer&&(m>=10||m<=3)?'Zeit für Winterreifen?':winter&&m>=4&&m<=9?'Zeit für Sommerreifen?':'';
+    items.push({t:'reifen',l:rf.reifen.replace(' drauf',''),v:'seit '+fmtS(rf.datum),lvl:hint?'warn':'',s:hint})}
+  if(!items.length)return '';
+  return `<div><div class="sechead"><h2>Fahrzeug</h2></div><div class="list" style="margin-top:10px">${items.map((x,i)=>`<button type="button" class="row due${x.lvl?' '+x.lvl:''}" data-due="${x.t}" style="--j:${i}">
+    <span class="date sv">${svcIco(x.t)}</span><span class="main"><span class="t">${esc(x.l)}</span><span class="s">${x.t==='reifen'?esc(x.v):'fällig '+esc(x.v)}</span>
+    ${x.s?`<span class="s"><span class="pill${x.lvl?' '+x.lvl:''}">${esc(x.s)}</span></span>`:''}</span></button>`).join('')}</div></div>`}
+
+/* Kosten nach Art im laufenden Jahr */
+function breakdownHtml(){
+  const y=String(new Date().getFullYear());const parts={Kraftstoff:0,Autowäsche:0};
+  db.fills.filter(f=>f.datum.startsWith(y)).forEach(f=>{parts.Kraftstoff+=+f.betrag||0;parts.Autowäsche+=+f.waesche||0});
+  db.services.filter(v=>v.datum.startsWith(y)).forEach(v=>{const n=(SVC[v.typ]||SVC.sonst).n;parts[n]=(parts[n]||0)+(+v.betrag||0)});
+  const rows=Object.entries(parts).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]);if(!rows.length)return '';
+  const mx=rows[0][1],tot=rows.reduce((a,[,v])=>a+v,0);
+  return `<div class="summary"><div class="label">Kosten ${y} nach Art</div>
+    <div class="bars">${rows.map(([k,v])=>`<div class="bar"><span class="bl">${esc(k)}</span><span class="track"><span class="fill" style="width:${(v/mx*100).toFixed(1)}%"></span></span><span class="num">${eur(v)}</span></div>`).join('')}</div>
+    <p class="hint">Gesamt: ${eur(tot)}</p></div>`}
+
+async function openSvcDetail(id){
+  const v=db.services.find(x=>x.id===id);if(!v)return;
+  let url=null;if(v.foto){const b=await fotoGet(v.foto).catch(()=>null);if(b)url=URL.createObjectURL(b)}
+  const det=svcDetail(v),nx=nextText(v);
+  openSheet(head(esc(svcName(v)))+`
+    ${url?`<img class="photo tiltme" src="${url}" alt="Beleg">`:''}
+    <dl class="kv">
+      <dt>Datum</dt><dd>${fmtS(v.datum)}</dd>
+      ${v.km?`<dt>Kilometerstand</dt><dd class="num">${km(v.km)}</dd>`:''}
+      ${det?`<dt>${v.typ==='adblue'?'Menge':v.typ==='reifen'?'Bereifung':'Was'}</dt><dd>${esc(det)}</dd>`:''}
+      <dt>Kosten</dt><dd class="num">${v.betrag?eur(v.betrag):'ohne Kosten'}</dd>
+      ${v.ort?`<dt>Werkstatt / Ort</dt><dd>${esc(v.ort)}</dd>`:''}
+      ${nx?`<dt>Nächste fällig</dt><dd>${esc(nx)}</dd>`:''}
+      ${v.notiz?`<dt>Notiz</dt><dd>${esc(v.notiz)}</dd>`:''}
+    </dl>
+    <div class="actions two"><button type="button" class="btn primary" id="dEdit">Bearbeiten</button><button type="button" class="btn danger" id="dDel">Löschen</button></div>`,
+  s=>{s.querySelector('#dEdit').onclick=()=>openSvcForm(v.id);
+    s.querySelector('#dDel').onclick=async()=>{if(!confirm('Diesen Eintrag löschen?'))return;
+      db.services=db.services.filter(y=>y.id!==v.id);if(v.foto)fotoDel(v.foto).catch(()=>{});await save();closeSheet();render();toast('Eintrag gelöscht.')};
+    const img=s.querySelector('.photo');if(img)img.onclick=()=>window.open(url,'_blank')});
+}
+
+function openSvcForm(id,typ){
+  const old=id?db.services.find(x=>x.id===id):null;
+  const v=old?Object.assign({},old):{typ:typ&&SVC[typ]?typ:'adblue',datum:iso(new Date())};
+  const kmNow=(()=>{const a=allEntries().map(e=>+e.km||0);return a.length?Math.max(...a):null})();
+  let newFoto=null,fotoGone=false,previewUrl=null;
+  const nv=(k,d)=>v[k]==null||v[k]===''||Number.isNaN(v[k])?'':nf(v[k],d).replace(/\./g,'');
+  openSheet(head(old?svcName(v)+' bearbeiten':'Service eintragen')+`
+    <form id="sf" novalidate>
+      <div class="field"><span>Art</span><div class="svcpick" role="radiogroup">${Object.entries(SVC).map(([k,o])=>`<label class="sp"><input type="radio" name="typ" value="${k}"${k===v.typ?' checked':''}>${svcIco(k)}<span>${o.n}</span></label>`).join('')}</div></div>
+      <label class="field" data-f="titel"><span>Was?</span><input name="titel" maxlength="60" value="${esc(v.titel||'')}" placeholder="z. B. Scheibenwischer, Ölstand"></label>
+      <div class="grid2"><label class="field"><span>Datum</span><input name="datum" type="date" required value="${esc(v.datum)}"></label>
+        <label class="field"><span>Kilometerstand</span><input name="km" inputmode="numeric" placeholder="${kmNow?'zuletzt '+nf(kmNow,0):'optional'}" value="${v.km||''}"></label></div>
+      <div class="grid2"><label class="field" data-f="menge"><span>Menge (l)</span><input name="menge" inputmode="decimal" placeholder="z. B. 10" value="${nv('menge',1)}"></label>
+        <label class="field" data-f="reifen"><span>Bereifung</span><select name="reifen">${REIFEN.map(x=>`<option${x===v.reifen?' selected':''}>${x}</option>`).join('')}</select></label>
+        <label class="field"><span>Kosten (€)</span><input name="betrag" inputmode="decimal" placeholder="leer = ohne Kosten" value="${nv('betrag',2)}"></label></div>
+      <label class="field"><span>Werkstatt / Ort</span><input name="ort" maxlength="80" value="${esc(v.ort||'')}" list="ortlist" placeholder="optional"></label>
+      <datalist id="ortlist">${[...new Set(svcByDate().map(x=>x.ort).filter(Boolean))].slice(0,12).map(x=>`<option value="${esc(x)}">`).join('')}</datalist>
+      <label class="field" data-f="nextm"><span>Nächster TÜV (Monat)</span><input name="nextm" type="month" value="${v.typ==='tuev'?esc(v.next||''):''}"></label>
+      <div class="grid2" data-f="nexti"><label class="field"><span>Nächste Inspektion am</span><input name="nextd" type="date" value="${v.typ==='inspektion'?esc(v.next||''):''}"></label>
+        <label class="field"><span>oder bei km</span><input name="nextkm" inputmode="numeric" placeholder="optional" value="${v.nextKm||''}"></label></div>
+      <label class="field"><span>Notiz (optional)</span><input name="notiz" maxlength="200" value="${esc(v.notiz||'')}" placeholder=""></label>
+      <div class="field"><span>Beleg / Foto (optional)</span>
+        <div class="fotobox" id="sbox"></div>
+        <div class="actions"><label class="btn">${svg('cam','bi')} Foto aufnehmen<input id="scam" type="file" accept="image/*" capture="environment" hidden></label>
+          <label class="btn">Aus Galerie<input id="sgal" type="file" accept="image/*" hidden></label>
+          <button type="button" class="btn" id="srm" hidden>Foto entfernen</button></div></div>
+      <div class="actions two"><button type="button" class="btn" data-close>Abbrechen</button><button class="btn primary" id="ssave">Speichern</button></div>
+    </form>`,
+  s=>{
+    const fm=s.querySelector('#sf'),box=s.querySelector('#sbox'),rm=s.querySelector('#srm');
+    s.querySelector('[data-close]').onclick=()=>closeSheet();
+    const NOTE={adblue:'',reifen:'',inspektion:'z. B. Ölwechsel, Bremsen',tuev:'z. B. ohne Mängel',panne:'Was ist passiert? Abschleppdienst?',sonst:''};
+    const vis=()=>{const t=fm.elements.typ.value;
+      const show={titel:t==='sonst'||t==='panne',menge:t==='adblue',reifen:t==='reifen',nextm:t==='tuev',nexti:t==='inspektion'};
+      fm.querySelectorAll('[data-f]').forEach(x=>{x.hidden=!show[x.dataset.f]});
+      fm.querySelector('[data-f=titel] span').textContent=t==='panne'?'Was war los?':'Was?';
+      fm.elements.notiz.placeholder=NOTE[t]||'';
+      s.querySelector('.sheethead h2').textContent=old?svcName({typ:t,titel:v.titel})+' bearbeiten':(SVC[t].n+' eintragen');
+      // TÜV: Vorschlag in 2 Jahren
+      sugg();
+    };
+    let autoNext=!fm.elements.nextm.value;
+    const sugg=()=>{const el=fm.elements;if(el.typ.value!=='tuev'||!autoNext||!el.datum.value)return;const d=parse(el.datum.value);el.nextm.value=(d.getFullYear()+2)+'-'+String(d.getMonth()+1).padStart(2,'0')};
+    fm.elements.nextm.addEventListener('input',()=>{autoNext=false});fm.elements.datum.addEventListener('change',sugg);fm.elements.datum.addEventListener('input',sugg);
+    fm.addEventListener('change',e=>{if(e.target.name==='typ'){vis();buzz(4)}});vis();
+    const showFoto=async()=>{if(previewUrl)URL.revokeObjectURL(previewUrl);previewUrl=null;
+      let b=newFoto;if(!b&&v.foto&&!fotoGone)b=await fotoGet(v.foto).catch(()=>null);
+      if(b){previewUrl=URL.createObjectURL(b);box.innerHTML=`<img class="photo" src="${previewUrl}" alt="Beleg">`;rm.hidden=false}else{box.innerHTML='';rm.hidden=true}};
+    showFoto();
+    const pick=async inp=>{const file=inp.files[0];inp.value='';if(!file)return;box.innerHTML='<span class="muted">Foto wird vorbereitet …</span>';
+      const b=await shrink(file);if(!b){toast('Dieses Bild lässt sich nicht lesen.');showFoto();return}newFoto=b;fotoGone=false;await showFoto();buzz(6)};
+    s.querySelector('#scam').addEventListener('change',e=>pick(e.target));s.querySelector('#sgal').addEventListener('change',e=>pick(e.target));
+    rm.onclick=()=>{newFoto=null;fotoGone=true;showFoto()};
+    fm.onsubmit=async e=>{e.preventDefault();const el=fm.elements,t=el.typ.value;
+      fm.querySelectorAll('.field.no').forEach(x=>x.classList.remove('no'));
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(el.datum.value)){el.datum.closest('.field').classList.add('no');toast('Bitte ein Datum eintragen.');return}
+      if(t==='sonst'&&!el.titel.value.trim()){el.titel.closest('.field').classList.add('no');toast('Bitte kurz eintragen, was gemacht wurde.');return}
+      const o={typ:t,datum:el.datum.value,km:Math.round(num(el.km.value))||null,betrag:num(el.betrag.value),ort:el.ort.value.trim(),notiz:el.notiz.value.trim()};
+      if(t==='sonst'||t==='panne')o.titel=el.titel.value.trim();
+      if(t==='adblue')o.menge=num(el.menge.value);
+      if(t==='reifen')o.reifen=el.reifen.value;
+      if(t==='tuev')o.next=el.nextm.value||null;
+      if(t==='inspektion'){o.next=el.nextd.value||null;o.nextKm=Math.round(num(el.nextkm.value))||null}
+      if(o.km&&kmNow&&o.km>kmNow+5000&&!fm.dataset.ok){fm.dataset.ok='1';toast('Der Kilometerstand liegt weit über dem letzten. Nochmal „Speichern“ tippen, wenn er stimmt.');buzz([20,40,20]);return}
+      const rec=Object.assign(old?{id:old.id,created:old.created,foto:old.foto}:{id:uid(),created:Date.now()},o,{updated:Date.now()});
+      Object.keys(rec).forEach(k=>{if(rec[k]==null||rec[k]===''||(typeof rec[k]==='number'&&Number.isNaN(rec[k])))delete rec[k]});
+      if(newFoto){const fid=uid();await fotoPut(fid,newFoto);if(rec.foto)fotoDel(rec.foto).catch(()=>{});rec.foto=fid}
+      else if(fotoGone&&rec.foto){fotoDel(rec.foto).catch(()=>{});delete rec.foto}
+      if(old)db.services[db.services.findIndex(x=>x.id===old.id)]=rec;else db.services.push(rec);
+      await save();DS.savedTick(s.querySelector('#ssave'));
+      setTimeout(()=>{closeSheet();render();toast(svcName(rec)+' gespeichert.')},motion()?500:0)};
+  });
 }
 
 /* ---------- Formular ---------- */
@@ -427,12 +601,15 @@ function openForm(id,withPhoto){
         <div class="actions"><label class="btn${old||f.foto?'':' primary'}">${svg('cam','bi')} ${f.foto?'Neues Foto':'Foto aufnehmen'}<input id="fcam" type="file" accept="image/*" capture="environment" hidden></label>
           <label class="btn">Aus Galerie<input id="fgal" type="file" accept="image/*" hidden></label>
           <button type="button" class="btn" id="frm"${f.foto?'':' hidden'}>Foto entfernen</button></div>
-        <p class="hint">Automatisches Auslesen kommt mit dem nächsten Update. Bis dahin die Werte von der Quittung abtippen.</p></div>
+        <p class="hint">Automatisches Auslesen (inkl. Autowäsche) kommt mit einem der nächsten Updates. Bis dahin die Werte von der Quittung abtippen.</p></div>
       <div class="grid2"><label class="field"><span>Datum</span><input name="datum" type="date" required value="${esc(f.datum)}"></label>
         <label class="field"><span>Uhrzeit</span><input name="zeit" type="time" value="${esc(f.zeit||'')}"></label></div>
       <label class="field"><span>Kilometerstand</span><input name="km" inputmode="numeric" required placeholder="${last?'zuletzt '+nf(last.km,0):'z. B. 48 250'}" value="${f.km!=null?f.km:''}"></label>
       <div class="grid2"><label class="field"><span>Liter</span><input name="liter" inputmode="decimal" required placeholder="45,12" value="${v('liter',2)}"></label>
-        <label class="field"><span>Betrag (€)</span><input name="betrag" inputmode="decimal" required placeholder="78,40" value="${v('betrag',2)}"></label></div>
+        <label class="field"><span>Betrag Kraftstoff (€)</span><input name="betrag" inputmode="decimal" required placeholder="78,40" value="${v('betrag',2)}"></label></div>
+      <div class="grid2"><label class="field"><span>Autowäsche (€)</span><input name="waesche" inputmode="decimal" placeholder="keine" value="${v('waesche',2)}"></label>
+        <div class="field"><span>Quittung gesamt</span><output id="fsum" class="num sumout">–</output></div></div>
+      <p class="hint" style="margin-top:-6px">Steht eine Wäsche mit auf der Quittung, bei „Betrag Kraftstoff“ nur den Sprit eintragen.</p>
       <div class="grid2"><label class="field"><span>Preis pro Liter (€)</span><input name="ppl" inputmode="decimal" placeholder="wird berechnet" value="${v('ppl',3)}"></label>
         <label class="field"><span>Kraftstoff</span><select name="sorte">${SORTEN.map(x=>`<option${x===f.sorte?' selected':''}>${x}</option>`).join('')}</select></label></div>
       <label class="field"><span>Tankstelle / Ort</span><input name="station" maxlength="80" value="${esc(f.station||'')}" placeholder="z. B. Aral Kamen" list="stlist"></label>
@@ -456,9 +633,9 @@ function openForm(id,withPhoto){
     s.querySelector('#fcam').addEventListener('change',e=>pick(e.target));s.querySelector('#fgal').addEventListener('change',e=>pick(e.target));
     rm.onclick=()=>{newFoto=null;fotoGone=true;showFoto()};
     const read=()=>{const e=fm.elements;const o={datum:e.datum.value,zeit:e.zeit.value,km:Math.round(num(e.km.value)),liter:num(e.liter.value),betrag:num(e.betrag.value),
-      ppl:num(e.ppl.value),sorte:e.sorte.value,station:e.station.value.trim(),voll:e.voll.checked,notiz:e.notiz.value.trim()};
+      ppl:num(e.ppl.value),waesche:num(e.waesche.value),sorte:e.sorte.value,station:e.station.value.trim(),voll:e.voll.checked,notiz:e.notiz.value.trim()};
       if(!(o.ppl>0)&&o.liter>0&&o.betrag>0)o.ppl=Math.round(o.betrag/o.liter*1000)/1000;return o};
-    const live=()=>{const o=read();const ph=fm.elements.ppl;if(!ph.value)ph.placeholder=o.liter>0&&o.betrag>0?nf(o.betrag/o.liter,3)+' (berechnet)':'wird berechnet';
+    const live=()=>{const o=read();const so=fm.querySelector('#fsum');if(so)so.textContent=o.betrag>0||o.waesche>0?eur((o.betrag||0)+(o.waesche||0)):'–';const ph=fm.elements.ppl;if(!ph.value)ph.placeholder=o.liter>0&&o.betrag>0?nf(o.betrag/o.liter,3)+' (berechnet)':'wird berechnet';
       const w=checks(o,old&&old.id);warn.hidden=!w.length;warn.innerHTML=w.map(esc).join('<br>')};
     fm.addEventListener('input',live);fm.addEventListener('change',live);if(old)live();
     if(withPhoto&&!old)setTimeout(()=>s.querySelector('#fcam').click(),motion()?450:50);
@@ -472,6 +649,7 @@ function openForm(id,withPhoto){
       if(newFoto){const fid=uid();await fotoPut(fid,newFoto);if(rec.foto)fotoDel(rec.foto).catch(()=>{});rec.foto=fid}
       else if(fotoGone&&rec.foto){fotoDel(rec.foto).catch(()=>{});rec.foto=null}
       if(!rec.ppl||Number.isNaN(rec.ppl))delete rec.ppl;
+      if(!(rec.waesche>0))delete rec.waesche;
       const first=!db.fills.length;if(!old)db.fills.push(rec);
       await save();DS.savedTick(s.querySelector('#fsave'));
       setTimeout(()=>{closeSheet();render();if(first)celebrate('Erste Tankung!');else{const x=calc()[rec.id];toast(x&&x.verb!=null?`Gespeichert · ${nf(x.verb,1)} l/100 km`:'Gespeichert.')}},motion()?500:0)};
@@ -575,7 +753,7 @@ function openMenu(open){
     <div class="ds-acts"><button type="button" class="ds-btn${g?'':' pri'}" id="bkGo">Sicherung erstellen</button><label class="ds-btn">Sicherung laden<input id="bkIn" type="file" accept=".tankbox,application/json" hidden></label></div>
     ${persisted===false?'<p class="ds-hint" style="margin-top:10px">Der Browser hat dauerhaften Speicher nicht zugesagt. Installiere die App auf dem Startbildschirm und sichere regelmäßig.</p>':''}`,!!(g&&(ghStat.conflict||ghStat.err)))
   +mAcc('exp','sheet','Export','Tabelle für Excel oder die Abrechnung',`
-    <p class="ds-hint">Alle Tankungen als CSV-Datei mit Kilometerstand, Litern, Beträgen und Verbrauch. Öffnet sich direkt in Excel.</p>
+    <p class="ds-hint">Alle Tankungen, Wäschen und Service-Einträge als CSV-Datei mit Kilometerstand, Litern, Beträgen und Verbrauch. Öffnet sich direkt in Excel.</p>
     <div class="ds-acts"><button type="button" class="ds-btn" id="csvGo">Als CSV exportieren</button></div>`)
   +mAcc('upd','pkg','App-Update','Version '+APP_VERSION+' · '+(u?'GitHub verbunden':'nicht verbunden'),`
     ${u?`<p class="ds-hint">Verbunden mit <b>${esc(u.repo)}</b>. Lade hier das Zip-Paket einer neuen Version hoch – GitHub prüft die Versionsnummer und veröffentlicht es in 1–2 Minuten.</p>
@@ -584,7 +762,7 @@ function openMenu(open){
     <div class="ds-acts"><button type="button" class="ds-btn pri" id="up_chg">GitHub verbinden</button></div>`}
     <div id="updStatus" class="ds-box"${UPD?'':' hidden'}>${UPD}</div>`,!!UPD)
   +mAcc('look','sun','Darstellung',({auto:'Automatisch',light:'Hell',dark:'Dunkel'})[DS.getTheme()]+' · hell oder dunkel',`<div class="ds-lbl">Hell oder dunkel</div>${DS.themeHtml()}`)
-  +mAcc('eintr','list','Einträge',db.fills.length+' Tankung'+(db.fills.length===1?'':'en'),`
+  +mAcc('eintr','list','Einträge',db.fills.length+' Tankung'+(db.fills.length===1?'':'en')+(db.services.length?' · '+db.services.length+' Service':''),`
     <p class="ds-hint">Löscht alle Tankungen und Fotos auf diesem Handy. In GitHub bleibt alles liegen. Das lässt sich nicht rückgängig machen.</p>
     <div class="ds-acts"><button type="button" class="ds-btn dng" id="del">Alle Einträge löschen</button></div>`)
   +`<div class="ds-lbl">Meine Boxen</div>${DS.boxesHtml()}<p class="ds-ver">MyTankBox · Version ${APP_VERSION}${IS_TEST?' · Test-App, eigener Speicher':''}</p>`,
@@ -623,10 +801,10 @@ function openMenu(open){
     bi.addEventListener('change',async()=>{const file=bi.files[0];bi.value='';if(!file)return;
       let o;try{o=await readBackupFile(file)}catch(x){toast(x.message);return}
       if(confirm(`Die Tankungen auf diesem Handy werden durch die Sicherung ersetzt (${o.fills.length} Tankungen). Fortfahren?`))saving.then(()=>restoreBackup(o))});
-    s.querySelector('#csvGo').onclick=async()=>{if(!db.fills.length){toast('Noch keine Tankungen.');return}if(await exportCsv())toast('CSV exportiert.')};
-    s.querySelector('#del').onclick=async()=>{if(!db.fills.length){toast('Es gibt nichts zu löschen.');return}
-      if(!confirm('Wirklich alle '+db.fills.length+' Tankungen und Fotos auf diesem Handy löschen?'))return;
-      db.fills=[];db.did=uid();await fotoClear().catch(()=>{});await save();closeSheet(false);render();toast('Alle Einträge gelöscht.')};
+    s.querySelector('#csvGo').onclick=async()=>{if(!allEntries().length){toast('Noch keine Einträge.');return}if(await exportCsv())toast('CSV exportiert.')};
+    s.querySelector('#del').onclick=async()=>{if(!allEntries().length){toast('Es gibt nichts zu löschen.');return}
+      if(!confirm('Wirklich alle '+allEntries().length+' Einträge und Fotos auf diesem Handy löschen?'))return;
+      db.fills=[];db.services=[];db.did=uid();await fotoClear().catch(()=>{});await save();closeSheet(false);render();toast('Alle Einträge gelöscht.')};
   });
 }
 
@@ -676,7 +854,7 @@ function setFan(open){
   else{fan.classList.remove('show');setTimeout(()=>{if(!fanOpen)fan.hidden=true},motion()?260:0)}
 }
 fab.onclick=()=>setFan(!fanOpen);
-fan.addEventListener('click',e=>{const b=e.target.closest('[data-neu]');setFan(false);if(!b)return;openForm(null,b.dataset.neu==='foto')});
+fan.addEventListener('click',e=>{const b=e.target.closest('[data-neu]');setFan(false);if(!b)return;if(b.dataset.neu==='service')openSvcForm();else openForm(null,b.dataset.neu==='foto')});
 let lastY=0;addEventListener('scroll',()=>{const y=window.scrollY;if(Math.abs(y-lastY)<8)return;
   fab.classList.toggle('shrunk',y>lastY&&y>120);lastY=y},{passive:true});
 

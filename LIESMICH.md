@@ -1,6 +1,15 @@
-# MyTankBox – Test-App 0.2.0.1
+# MyTankBox – Test-App 0.3.0.1
 
 Tankungen des Dienstwagens mit Quittungsfoto erfassen, Verbrauch und Kosten auswerten. Alle Daten bleiben auf dem Handy. Es gibt keinen Server. Einzige mögliche Verbindungen: die optionale automatische Sicherung in dein eigenes privates GitHub-Repo und das App-Update in das App-Repo.
+
+## Neu in 0.3 – Autowäsche und Service
+
+- **Autowäsche** bei der Tankung: eigenes Feld, die App zeigt „Quittung gesamt“. Beim späteren automatischen Auslesen wird die Wäsche mit erkannt.
+- **Service eintragen** (im Tanken-Fächer): AdBlue (Liter, Kosten), Reifenwechsel (Winter/Sommer/Ganzjahr/neu), Inspektion (nächste fällig am Datum oder bei km), TÜV/HU (nächster Termin, Vorschlag in 2 Jahren), Panne (was war los) und Sonstiges. Kosten sind optional, Foto vom Beleg ebenso.
+- **Fahrzeug** auf der Übersicht: wann TÜV und Inspektion fällig sind (orange ab 45 bzw. 30 Tagen oder 1.500 km, rot wenn überschritten) und welche Reifen drauf sind, mit Hinweis zur Wechselzeit.
+- Zweiter Tab heißt jetzt **Verlauf** und zeigt Tankungen und Service-Einträge gemeinsam, mit Monatssummen.
+- **Auswertung**: Monatskosten inkl. Wäsche und Service, neue Karte „Kosten nach Art“.
+- CSV-Export, Sicherungsdatei und GitHub-Sicherung enthalten auch Wäsche und Service.
 
 ## Neu in 0.2 – Gesten & Bewegung wie in der MyBelegBox
 
