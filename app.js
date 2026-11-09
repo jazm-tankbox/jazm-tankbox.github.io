@@ -1,6 +1,6 @@
 (function(){
 'use strict';
-const APP_VERSION='0.8.0.1';
+const APP_VERSION='0.9.0.1';
 /* Eigener Speicher je Adresse: die Live-App unter / behält ihre Namen, eine Test-App unter /test/ bekommt eigene */
 const BASE=location.pathname.replace(/[^/]*$/,'');
 const NS=BASE==='/'?'':BASE.replace(/^\/|\/$/g,'').replace(/[^a-z0-9]+/gi,'-').toLowerCase()+'-';
@@ -175,7 +175,7 @@ async function ghSync(force){
   ghBusy=true;clearTimeout(ghTimer);ghTimer=0;setGhStat({});
   try{
     // 1) Fotos, die im Repo noch fehlen (Fotos ändern sich nie, daher reicht der Name)
-    const ids=allEntries().map(f=>f.foto).concat(db.stationen.map(x=>x.bild)).filter(Boolean);
+    const ids=allEntries().map(f=>f.foto).concat(db.stationen.map(x=>x.bild),Object.values(db.meta.brandImgs||{})).filter(Boolean);
     if(ids.length){
       const list=await ghFetch(g,'GET','/contents/fotos');const have=new Set((list||[]).map(x=>String(x.name).replace(/\.jpg$/,'')));
       for(const id of ids){if(have.has(id))continue;const b=await fotoGet(id).catch(()=>null);if(!b)continue;
@@ -209,7 +209,8 @@ document.addEventListener('visibilitychange',()=>{if(document.hidden&&ghTimer)gh
 async function ghRestore(g,onStep){
   const {json}=await ghRemote(g);let o=null;try{o=JSON.parse(json)}catch(e){}
   if(!o||o.app!=='tankbox'||!Array.isArray(o.fills))throw new Error('Im Repo wurde keine MyTankBox-Sicherung gefunden.');
-  const need=o.fills.concat(o.services||[]).map(f=>f.foto).concat((o.stationen||[]).map(x=>x.bild)).filter(Boolean);let n=0;
+  const need=o.fills.concat(o.services||[]).map(f=>f.foto).concat((o.stationen||[]).map(x=>x.bild)).filter(Boolean);
+  if(o.meta&&o.meta.brandImgs)need.push(...Object.values(o.meta.brandImgs));let n=0;
   for(const id of need){onStep&&onStep(++n,need.length);if(await fotoGet(id).catch(()=>null))continue;
     const b=await ghFetch(g,'GET','/contents/fotos/'+encodeURIComponent(id)+'.jpg',null,true).catch(()=>null);
     if(b)await fotoPut(id,new Blob([b],{type:'image/jpeg'}))}
@@ -219,7 +220,7 @@ async function ghRestore(g,onStep){
 
 /* ---------- Sicherungsdatei (zusätzlich oder statt GitHub) ---------- */
 async function exportBackup(){
-  const fotos={};for(const id of allEntries().map(f=>f.foto).concat(db.stationen.map(x=>x.bild)).filter(Boolean)){const b=await fotoGet(id).catch(()=>null);if(b)fotos[id]=toB64(await b.arrayBuffer())}
+  const fotos={};for(const id of allEntries().map(f=>f.foto).concat(db.stationen.map(x=>x.bild),Object.values(db.meta.brandImgs||{})).filter(Boolean)){const b=await fotoGet(id).catch(()=>null);if(b)fotos[id]=toB64(await b.arrayBuffer())}
   const o=JSON.parse(payload());o.exported=new Date().toISOString();o.fotos=fotos;
   const ok=await deliverFile('tankbox-sicherung-'+iso(new Date())+'.tankbox',JSON.stringify(o),'application/json');
   if(ok){db.meta.dirty=0;db.meta.lastBackup=iso(new Date());await save(false,false);bkDot();toast('Sicherung erstellt.')}
@@ -264,7 +265,7 @@ function openSheet(html,onMount){
 }
 function dragSheet(sc,sh){
   let y0=0,x0=0,dy=0,mode=null,v=0,ly=0,lt=0,hit=false;
-  sh.addEventListener('touchstart',e=>{if(e.touches.length!==1){mode='x';return}const t=e.touches[0];y0=ly=t.clientY;x0=t.clientX;lt=performance.now();dy=0;v=0;mode=null;hit=false},{passive:true});
+  sh.addEventListener('touchstart',e=>{if(e.touches.length!==1||(e.target.closest&&e.target.closest('.mapfull,.mapbox'))){mode='x';return}const t=e.touches[0];y0=ly=t.clientY;x0=t.clientX;lt=performance.now();dy=0;v=0;mode=null;hit=false},{passive:true});
   sh.addEventListener('touchmove',e=>{if(mode==='x'||mode==='scroll'||sc.classList.contains('closing'))return;
     const t=e.touches[0],d=t.clientY-y0,dx=t.clientX-x0;
     if(!mode){if(Math.abs(d)<7&&Math.abs(dx)<7)return;
@@ -611,14 +612,14 @@ const ST_COLORS=['#64748B','#B4530F','#2563EB','#0E7490','#15803D','#A16207','#B
 const hashC=s=>{let h=0;for(const ch of String(s))h=(h*31+ch.charCodeAt(0))>>>0;return ST_COLORS[h%ST_COLORS.length]};
 const stImg=new Map();
 async function loadStImgs(){
-  const want=new Set(db.stationen.map(s=>s.bild).filter(Boolean));
+  const want=new Set(db.stationen.map(s=>s.bild).concat(Object.values(db.meta.brandImgs||{})).filter(Boolean));
   for(const [id,u] of stImg)if(!want.has(id)){URL.revokeObjectURL(u);stImg.delete(id)}
   let added=false;for(const id of want){if(stImg.has(id))continue;const b=await fotoGet(id).catch(()=>null);if(b){stImg.set(id,URL.createObjectURL(b));added=true}}
   return added}
 const stOf=f=>{if(!f||!f.station)return null;const a=addrParts(f.adresse);
   return (a&&findStation(a.plz,a.strasse))||db.stationen.find(s=>s.name===f.station)||null};
 function badge(st,name,cls=''){const n=(st&&st.name)||name||'';if(!n)return '';
-  const img=st&&st.bild&&stImg.get(st.bild);
+  const img=(st&&st.bild&&stImg.get(st.bild))||brandImgUrl(n)||(name&&name!==n?brandImgUrl(name):null);
   if(img)return `<img class="stb ${cls}" src="${img}" alt="">`;
   const ch=(n.match(/[A-Za-zÄÖÜäöü0-9]/)||['?'])[0].toUpperCase();
   return `<span class="stb ${cls}" style="--stc:${(st&&st.farbe)||hashC(n)}" aria-hidden="true">${esc(ch)}</span>`}
@@ -726,9 +727,13 @@ function nearItems(){
       label:(brand&&name?(name.toLowerCase().includes(brand.toLowerCase())?name:brand+' · '+name):(brand||name))||'Tankstelle',
       addr:[street,[plz,city].filter(Boolean).join(' ')].filter(Boolean).join(', '),open:oh||'',ok:shell?false:!!(b&&cardOn().includes(b.k))})}}
   return out.sort((a,b)=>a.d-b.d)}
+const viewSeg=()=>`<button type="button" data-view="liste" aria-pressed="${nearState.view!=='karte'}">Liste</button><button type="button" data-view="karte" aria-pressed="${nearState.view==='karte'}">Karte</button>`;
 function nearHtml(){
   const st=nearState,items=nearItems(),all=st.only?items.filter(x=>x.ok):items,hidden=items.length-all.length,shown=all.slice(0,50);
-  return `<div class="nearctl">
+  if(st.view==='karte')return `<div class="nearctl"><div class="seg two">${viewSeg()}</div></div>
+    ${st.shell?`<div class="mapfull" id="nMap"></div><p class="hint">${nf(st.shell.n,0)} Stationen aus der Shell-Liste vom ${fmtS(st.shell.stand)}. Punkt antippen für Details und Route. Farben: Shell gelb, Esso blau, Eni/Agip grün, Westfalen rot, Markant violett, andere grau.</p>`
+      :'<div class="note">Für die Karte zuerst die Shell-Liste importieren: Daten → Tankstellen → „Shell-Liste importieren (CSV)“.</div>'}`;
+  return `<div class="nearctl"><div class="seg two">${viewSeg()}</div>
       <div class="seg" role="radiogroup" aria-label="Umkreis">${[5,10,25].map(r=>`<button type="button" data-r="${r}" aria-pressed="${st.r===r}">${r} km</button>`).join('')}</div>
       <label class="check"><input type="checkbox" id="nOnly"${st.only?' checked':''}> nur mit Shell Card</label></div>
     ${st.busy?`<p class="hint">⏳ ${esc(st.step||'Suche …')}</p>`:st.err?`<div class="note">${esc(st.err)}${st.detail?`<br><small>${esc(st.detail)}</small>`:''}</div><div class="actions"><button type="button" class="btn" id="nRetry">Nochmal versuchen</button></div>`:!(st.list||st.shell)?'':
@@ -762,7 +767,10 @@ function openNearDetail(x){
 function openNear(keep){
   openSheet(head('Tankstellen in der Nähe')+'<div id="nearBody"></div>',async s=>{
     const body=s.querySelector('#nearBody');
-    const draw=()=>{body.innerHTML=nearHtml();
+    let map=null;
+    const draw=()=>{if(map){map.remove();map=null}body.innerHTML=nearHtml();
+      body.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>{nearState.view=b.dataset.view;buzz(4);draw()});
+      if(nearState.view==='karte'){const el=body.querySelector('#nMap');if(el)drawMap(el,nearState).then(m=>{map=m}).catch(e=>{el.outerHTML=`<div class="note">${esc(e.message)}</div>`});return}
       body.querySelectorAll('[data-r]').forEach(b=>b.onclick=()=>{nearState.r=+b.dataset.r;buzz(4);search()});
       body.querySelector('#nOnly').onchange=e=>{nearState.only=e.target.checked;if(!nearState.only&&!nearState.list)search();else draw()};
       const rt=body.querySelector('#nRetry');if(rt)rt.onclick=()=>search();
@@ -786,6 +794,49 @@ function cardBrandsHtml(){const on=cardOn(),sl=db.meta.shellListe;
     <div class="ds-acts"><label class="ds-btn${sl?'':' pri'}">${sl?'Neue Shell-Liste importieren':'Shell-Liste importieren (CSV)'}<input id="shIn" type="file" accept=".csv,text/csv,text/comma-separated-values,application/vnd.ms-excel" hidden></label></div>
     ${sl?'':`<div class="ds-lbl sep">Ohne Shell-Liste: Akzeptanz nach Marke</div><p class="ds-hint">Für „Tankstellen in der Nähe“: An diesen Marken kannst du mit der Shell Card tanken (laut Shell-Übersicht, Stand 08/2023). Passe die Liste an, falls sich etwas ändert.</p>
     <div class="cbgrid">${CARD_BRANDS.map(b=>`<label class="check"><input type="checkbox" data-cb="${b.k}"${on.includes(b.k)?' checked':''}> ${b.n}</label>`).join('')}</div>`}`}
+
+/* ---------- Bilder je Marke (vom Nutzer hinterlegt) ---------- */
+const BRAND_LIST=['Shell','Esso','Eni','Agip','Westfalen','Markant','Aral','JET','TotalEnergies','AVIA','OMV','star','HEM','Raiffeisen'];
+const bKey=b=>String(b||'').trim().toLowerCase().replace(/[^a-z0-9äöü]/g,'');
+const brandImgs=()=>db.meta.brandImgs||(db.meta.brandImgs={});
+/* Marke aus einem Namen wie „Esso Bergkamen“ erkennen (nur Marken mit Bild) */
+function brandFromName(n){const s=String(n||'').toLowerCase();for(const k of Object.keys(brandImgs()))if(new RegExp('(^|[^a-zäöü])'+k+'([^a-zäöü]|$)').test(s))return k;return ''}
+function brandImgUrl(brandOrName){const m=brandImgs();let k=bKey(brandOrName);if(!m[k])k=brandFromName(brandOrName);return k&&m[k]?stImg.get(m[k])||null:null}
+function brandsHtml(){const m=brandImgs();const set=new Set(BRAND_LIST);
+  (nearState.shell&&nearState.shell.s||[]).forEach(a=>{if(a[2])set.add(a[2])});
+  return `<div class="ds-lbl sep">Bilder je Marke</div><p class="ds-hint">Hinterlege pro Marke ein Bild (z. B. ein Foto vom Schild). Die App zeigt es dann überall bei Tankstellen dieser Marke – in der Suche, auf der Karte und im Verlauf. Ein eigenes Bild einer gemerkten Tankstelle hat Vorrang.</p>
+    <div class="brgrid">${[...set].map(b=>{const k=bKey(b),u=m[k]&&stImg.get(m[k]);return `<div class="brcell"><label class="brpick" title="${esc(b)}">${u?`<img class="stb" src="${u}" alt="">`:`<span class="stb" style="--stc:${hashC(b)}">${esc(b[0].toUpperCase())}</span>`}<input type="file" accept="image/*" data-brimg="${esc(k)}" hidden></label><small>${esc(b)}</small>${u?`<button type="button" class="linkbtn" data-brdel="${esc(k)}">entfernen</button>`:''}</div>`}).join('')}</div>`}
+function bindBrands(s,reopen){
+  s.querySelectorAll('[data-brimg]').forEach(inp=>inp.addEventListener('change',async()=>{const f=inp.files[0];inp.value='';if(!f)return;
+    const b=await cropRound(f).catch(()=>null);if(!b){toast('Dieses Bild lässt sich nicht lesen.');return}
+    const k=inp.dataset.brimg,m=brandImgs(),id=uid();await fotoPut(id,b);if(m[k])fotoDel(m[k]).catch(()=>{});m[k]=id;
+    await save();await loadStImgs();render();buzz(6);toast('Bild gespeichert.');reopen()}));
+  s.querySelectorAll('[data-brdel]').forEach(bt=>bt.onclick=async()=>{const k=bt.dataset.brdel,m=brandImgs();if(m[k])fotoDel(m[k]).catch(()=>{});delete m[k];await save();await loadStImgs();render();reopen()});
+}
+
+/* ---------- Karte der Shell-Liste (Leaflet + OpenStreetMap-Kacheln) ---------- */
+const LEAFLET_JS='https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js',LEAFLET_CSS='https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css';
+let leafP=null;
+function leaflet(){if(window.L)return Promise.resolve(window.L);if(leafP)return leafP;
+  leafP=new Promise((res,rej)=>{const l=document.createElement('link');l.rel='stylesheet';l.href=LEAFLET_CSS;l.crossOrigin='anonymous';document.head.appendChild(l);
+    const s=document.createElement('script');s.src=LEAFLET_JS;s.crossOrigin='anonymous';s.onload=()=>res(window.L);s.onerror=()=>{leafP=null;rej(new Error('Karte konnte nicht geladen werden (keine Verbindung?).'))};document.head.appendChild(s)});
+  return leafP}
+const BRAND_COLOR=b=>({shell:'#D9A400',esso:'#2563EB',eni:'#15803D',agip:'#15803D',westfalen:'#B91C1C',markant:'#7C3AED'})[bKey(b)]||'#64748B';
+async function drawMap(el,st){
+  const L=await leaflet();if(!el.isConnected)return;
+  const c=st.pos||{lat:51.16,lon:10.45};
+  const map=L.map(el,{preferCanvas:true,zoomControl:true,attributionControl:true}).setView([c.lat,c.lon],st.pos?12:6);
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,referrerPolicy:'strict-origin-when-cross-origin',
+    attribution:'© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>'}).addTo(map);
+  const items=st.shell?st.shell.s:[];
+  const show=a=>{const [lat,lon,brand,addr,plz,city,fl,tel]=a;
+    const x={id:'s'+lat+','+lon,lat,lon,d:st.pos?distKm(st.pos.lat,st.pos.lon,lat,lon):0,src:'shell',brand:brand?{n:brand}:null,name:brand||'Tankstelle',label:(brand||'Tankstelle')+' '+city,
+      addr:[addr,[plz,city].filter(Boolean).join(' ')].filter(Boolean).join(', '),open:fl&1?'24/7':'',adblue:!!(fl&2),wash:!!(fl&4),tel,ok:true};openNearDetail(x)};
+  for(const a of items){const m=L.circleMarker([a[0],a[1]],{radius:6,weight:1.5,color:'#fff',fillColor:BRAND_COLOR(a[2]),fillOpacity:.95}).addTo(map);
+    m.bindTooltip(`${esc(a[2]||'Tankstelle')} · ${esc(a[3])}, ${esc(a[5])}`,{direction:'top'});m.on('click',()=>{buzz(4);show(a)})}
+  if(st.pos)L.circleMarker([st.pos.lat,st.pos.lon],{radius:8,weight:3,color:'#fff',fillColor:'#B4530F',fillOpacity:1}).addTo(map).bindTooltip('Du bist hier');
+  setTimeout(()=>map.invalidateSize(),250);
+  return map}
 
 /* ---------- Formular ---------- */
 async function shrink(file){
@@ -1008,7 +1059,7 @@ function openMenu(open){
     :`<p class="ds-hint">Neue Versionen als Zip direkt aus der App veröffentlichen. Dafür brauchst du einen eigenen Zugangsschlüssel nur für das App-Repo.</p>
     <div class="ds-acts"><button type="button" class="ds-btn pri" id="up_chg">GitHub verbinden</button></div>`}
     <div id="updStatus" class="ds-box"${UPD?'':' hidden'}>${UPD}</div>`,!!UPD)
-  +mAcc('stat','pump','Tankstellen',db.stationen.length+' gemerkt · Abzeichen & Bilder',`<p class="ds-hint">Tippe eine Tankstelle an, um Name, Farbe oder ein eigenes Bild (z. B. Foto vom Schild) festzulegen.</p>${stationsHtml()}${cardBrandsHtml()}`)
+  +mAcc('stat','pump','Tankstellen',db.stationen.length+' gemerkt · Abzeichen & Bilder',`<p class="ds-hint">Tippe eine Tankstelle an, um Name, Farbe oder ein eigenes Bild (z. B. Foto vom Schild) festzulegen.</p>${stationsHtml()}${brandsHtml()}${cardBrandsHtml()}`)
   +mAcc('look','sun','Darstellung',({auto:'Automatisch',light:'Hell',dark:'Dunkel'})[DS.getTheme()]+' · hell oder dunkel',`<div class="ds-lbl">Hell oder dunkel</div>${DS.themeHtml()}`)
   +mAcc('eintr','list','Einträge',db.fills.length+' Tankung'+(db.fills.length===1?'':'en')+(db.services.length?' · '+db.services.length+' Service':''),`
     <p class="ds-hint">Löscht alle Tankungen und Fotos auf diesem Handy. In GitHub bleibt alles liegen. Das lässt sich nicht rückgängig machen.</p>
@@ -1044,6 +1095,7 @@ function openMenu(open){
     const ghX=s.querySelector('#ghOff');if(ghX)ghX.onclick=()=>{if(!confirm('GitHub-Sicherung trennen? Im Repo bleibt alles liegen.'))return;
       setKeys({gh:null});setGhStat({err:'',at:0,conflict:false});openMenu('gh');toast('GitHub-Sicherung getrennt.')};
     bindUpd(s);
+    bindBrands(s,()=>openMenu('stat'));
     const shIn=s.querySelector('#shIn');if(shIn)shIn.addEventListener('change',async()=>{const f=shIn.files[0];shIn.value='';if(!f)return;
       toast('Shell-Liste wird eingelesen …');try{const o=await importShellCsv(f);openMenu('stat');celebrate('Importiert');toast(nf(o.n,0)+' Tankstellen aus der Shell-Liste übernommen.')}catch(x){toast(x&&x.message||'Import hat nicht geklappt.')}});
     s.querySelectorAll('[data-cb]').forEach(c=>c.onchange=async()=>{db.meta.cardBrands=[...s.querySelectorAll('[data-cb]:checked')].map(x=>x.dataset.cb);await save();buzz(4)});

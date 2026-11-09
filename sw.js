@@ -2,7 +2,7 @@
 // Eigene Namen je Adresse: Live unter / wie bisher, eine Test-App unter /test/ mit Präfix „test-“
 const SCOPE_PATH = new URL(self.registration.scope).pathname;
 const NS = SCOPE_PATH === '/' ? '' : SCOPE_PATH.replace(/^\/|\/$/g, '').replace(/[^a-z0-9]+/gi, '-').toLowerCase() + '-';
-const CACHE = NS + 'tankbox-0.8.0.1';
+const CACHE = NS + 'tankbox-0.9.0.1';
 const FILES = ['./', 'index.html', 'app.js', 'ocr.js', 'stationen.js', 'ds.js', 'manifest.webmanifest',
   'boxen/smartbox.png', 'boxen/gesundbox.png', 'boxen/belegbox.png', 'boxen/tankbox.png',
   'icons/tankbox-192.png', 'icons/tankbox-512.png', 'icons/tankbox-maskable-192.png', 'icons/tankbox-maskable-512.png',
@@ -23,7 +23,7 @@ self.addEventListener('fetch', e => {
   if (req.method !== 'GET') return;
   // Texterkennung (Tesseract.js) vom CDN: einmal laden, danach aus dem eigenen Speicher – auch offline.
   // Eigener Cache, der bei App-Updates erhalten bleibt (feste Versionsnummern in der URL).
-  if (url.origin === 'https://cdn.jsdelivr.net' || url.origin === 'https://tessdata.projectnaptha.com') {
+  if (url.origin === 'https://cdn.jsdelivr.net' || url.origin === 'https://tessdata.projectnaptha.com' || url.origin === 'https://cdnjs.cloudflare.com') {
     e.respondWith(caches.open(NS + 'ocr-v1').then(c => c.match(req).then(hit => hit || fetch(req).then(r => {
       if (r.ok || r.type === 'opaque') c.put(req, r.clone()).catch(() => {});
       return r;

@@ -1,4 +1,9 @@
-# MyTankBox – Test-App 0.8.0.1
+# MyTankBox – Test-App 0.9.0.1
+
+## Neu in 0.9 – Karte und Bilder je Marke
+
+- „Tankstellen in der Nähe“ hat oben „Liste | Karte“. Die Karte zeigt alle Stationen der Shell-Liste als farbige Punkte (Shell gelb, Esso blau, Eni/Agip grün, Westfalen rot, Markant violett, andere grau) und deinen Standort. Punkt antippen öffnet Details mit Route. Kartenbibliothek Leaflet 1.9.4 (cdnjs), Kacheln von OpenStreetMap.
+- Daten → Tankstellen → „Bilder je Marke“: pro Marke ein eigenes Bild hinterlegen. Es erscheint automatisch bei allen Tankstellen dieser Marke – in Suche, Verlauf und bei gemerkten Tankstellen (ein eigenes Bild einer gemerkten Tankstelle hat Vorrang). Die Bilder sind Teil der Sicherung.
 
 ## Neu in 0.8 – Shell-Liste importieren
 
