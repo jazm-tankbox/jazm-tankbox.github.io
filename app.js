@@ -1,6 +1,6 @@
 (function(){
 'use strict';
-const APP_VERSION='0.3.0.1';
+const APP_VERSION='0.4.0.1';
 /* Eigener Speicher je Adresse: die Live-App unter / behält ihre Namen, eine Test-App unter /test/ bekommt eigene */
 const BASE=location.pathname.replace(/[^/]*$/,'');
 const NS=BASE==='/'?'':BASE.replace(/^\/|\/$/g,'').replace(/[^a-z0-9]+/gi,'-').toLowerCase()+'-';
@@ -601,7 +601,7 @@ function openForm(id,withPhoto){
         <div class="actions"><label class="btn${old||f.foto?'':' primary'}">${svg('cam','bi')} ${f.foto?'Neues Foto':'Foto aufnehmen'}<input id="fcam" type="file" accept="image/*" capture="environment" hidden></label>
           <label class="btn">Aus Galerie<input id="fgal" type="file" accept="image/*" hidden></label>
           <button type="button" class="btn" id="frm"${f.foto?'':' hidden'}>Foto entfernen</button></div>
-        <p class="hint">Automatisches Auslesen (inkl. Autowäsche) kommt mit einem der nächsten Updates. Bis dahin die Werte von der Quittung abtippen.</p></div>
+        <p class="hint" id="focr">Nach dem Foto liest die App die Quittung automatisch aus, inklusive Autowäsche und Kilometerstand.</p></div>
       <div class="grid2"><label class="field"><span>Datum</span><input name="datum" type="date" required value="${esc(f.datum)}"></label>
         <label class="field"><span>Uhrzeit</span><input name="zeit" type="time" value="${esc(f.zeit||'')}"></label></div>
       <label class="field"><span>Kilometerstand</span><input name="km" inputmode="numeric" required placeholder="${last?'zuletzt '+nf(last.km,0):'z. B. 48 250'}" value="${f.km!=null?f.km:''}"></label>
@@ -629,7 +629,36 @@ function openForm(id,withPhoto){
     showFoto();
     const pick=async inp=>{const file=inp.files[0];inp.value='';if(!file)return;box.innerHTML='<span class="muted">Foto wird vorbereitet …</span>';
       const b=await shrink(file);if(!b){toast('Dieses Bild lässt sich nicht lesen.');showFoto();return}newFoto=b;fotoGone=false;await showFoto();buzz(6);
-      const k=fm.elements.km;if(!k.value)k.focus()};
+      ocr(file)};
+    /* Quittung auslesen: füllt nur Felder, die du noch nicht selbst geändert hast */
+    const touched=new Set(),focr=s.querySelector('#focr');
+    fm.addEventListener('input',e=>{if(e.isTrusted&&e.target.name)touched.add(e.target.name)});
+    let ocrRun=0;
+    const ocr=async file=>{if(!window.TankOCR){focr.textContent='Die Texterkennung fehlt in diesem App-Stand.';return}
+      const run=++ocrRun;focr.className='hint ocrbusy';focr.textContent='Quittung wird gelesen …';
+      fm.querySelectorAll('.ocr').forEach(x=>x.classList.remove('ocr'));
+      let r;try{r=await TankOCR.read(file,(st,p)=>{if(run!==ocrRun)return;
+          focr.textContent=/recogni/i.test(st)?`Quittung wird gelesen … ${Math.round(p*100)} %`:'Texterkennung wird vorbereitet …'})}
+      catch(e){if(run!==ocrRun)return;focr.className='hint';
+        focr.textContent=navigator.onLine===false||(e&&e.message==='offline')?'Für das erste Auslesen braucht die App einmal Internet (lädt die Texterkennung, ca. 10 MB). Danach geht es auch offline.':'Auslesen hat nicht geklappt. Bitte die Werte abtippen.';return}
+      if(run!==ocrRun||!fm.isConnected)return;
+      const el=fm.elements,isNew=!old,put=(k,val)=>{if(val==null||val===''||Number.isNaN(val))return false;const i=el[k];if(!i||touched.has(k))return false;
+        if(i.value&&!(isNew&&(k==='datum'||k==='zeit'||k==='sorte')))return false;i.value=val;i.closest('.field,.check')?.classList.add('ocr');return true};
+      const fx=(v,d)=>nf(v,d).replace(/\./g,'');const got=[];
+      if(put('datum',r.datum))got.push(fmtS(r.datum));put('zeit',r.zeit);
+      if(put('km',r.km))got.push(km(r.km));
+      if(put('liter',r.liter&&fx(r.liter,2)))got.push(nf(r.liter,2)+' l');
+      if(put('ppl',r.ppl&&fx(r.ppl,3)))got.push(nf(r.ppl,3)+' €/l');
+      if(put('betrag',r.betrag&&fx(r.betrag,2)))got.push(eur(r.betrag));
+      if(put('waesche',r.waesche&&fx(r.waesche,2)))got.push('Wäsche '+eur(r.waesche));
+      if(r.sorte&&SORTEN.includes(r.sorte))put('sorte',r.sorte);
+      put('station',r.station);
+      live();buzz(got.length?[8,40,8]:[20,40,20]);
+      const miss=[!r.km&&'Kilometerstand',!r.liter&&'Liter',!r.betrag&&'Betrag'].filter(Boolean);
+      focr.className='hint '+(miss.length||!r.ok?'ocrwarn':'ocrok');
+      focr.innerHTML=got.length?`<b>Erkannt:</b> ${esc(got.join(' · '))}.`+(miss.length?` <b>Nicht gefunden:</b> ${esc(miss.join(', '))} – bitte ergänzen.`:r.ok&&r.sumOk!==false?' Rechnung geht auf ✓ Bitte kurz prüfen.':' Bitte prüfen.')
+        :'Auf dem Foto wurde nichts Brauchbares erkannt. Tipp: Quittung flach hinlegen, gerade von oben fotografieren, ohne Schatten.';
+      const first=fm.querySelector('.field.no, input:placeholder-shown[required]');if(miss.length&&first&&first.focus)first.focus()};
     s.querySelector('#fcam').addEventListener('change',e=>pick(e.target));s.querySelector('#fgal').addEventListener('change',e=>pick(e.target));
     rm.onclick=()=>{newFoto=null;fotoGone=true;showFoto()};
     const read=()=>{const e=fm.elements;const o={datum:e.datum.value,zeit:e.zeit.value,km:Math.round(num(e.km.value)),liter:num(e.liter.value),betrag:num(e.betrag.value),

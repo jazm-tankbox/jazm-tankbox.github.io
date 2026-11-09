@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#B4530F" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#15110E" media="(prefers-color-scheme: dark)">
 <meta name="description" content="Tankungen, Verbrauch und Kosten des Dienstwagens – auf deinem Handy.">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; worker-src 'self'; connect-src 'self' https://api.github.com; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; worker-src 'self' blob: https://cdn.jsdelivr.net; connect-src 'self' https://api.github.com https://cdn.jsdelivr.net https://tessdata.projectnaptha.com; object-src 'none'; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <title>MyTankBox</title>
 <link rel="manifest" href="manifest.webmanifest">
@@ -772,6 +772,10 @@ label.btn{display:inline-flex;align-items:center;gap:6px;cursor:pointer}
 .pill.crit{background:var(--crit-soft);color:var(--crit)}
 .sumout{display:flex;align-items:center;min-height:44px;font-weight:700;font-size:17px}
 form [hidden]{display:none!important}
+.field.ocr input,.field.ocr select{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+#focr.ocrbusy{color:var(--accent);font-weight:600}
+#focr.ocrok{color:var(--ok)}
+#focr.ocrwarn{color:var(--warn)}
 
 
 </style>
@@ -813,6 +817,7 @@ form [hidden]{display:none!important}
 
 <div id="sheetRoot"></div>
 
+<script src="ocr.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

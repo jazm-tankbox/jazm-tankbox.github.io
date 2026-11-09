@@ -1,6 +1,14 @@
-# MyTankBox – Test-App 0.3.0.1
+# MyTankBox – Test-App 0.4.0.1
 
-Tankungen des Dienstwagens mit Quittungsfoto erfassen, Verbrauch und Kosten auswerten. Alle Daten bleiben auf dem Handy. Es gibt keinen Server. Einzige mögliche Verbindungen: die optionale automatische Sicherung in dein eigenes privates GitHub-Repo und das App-Update in das App-Repo.
+Tankungen des Dienstwagens mit Quittungsfoto erfassen, Verbrauch und Kosten auswerten. Alle Daten bleiben auf dem Handy. Es gibt keinen Server. Einzige mögliche Verbindungen: die optionale automatische Sicherung in dein eigenes privates GitHub-Repo, das App-Update in das App-Repo und das einmalige Laden der Texterkennung (nur Programmdateien, keine Daten von dir).
+
+## Neu in 0.4 – Quittung automatisch auslesen
+
+- Nach dem Foto liest die App die Quittung aus: Datum, Uhrzeit, Kilometerstand, Liter, Preis pro Liter, Kraftstoff-Betrag, Autowäsche, Kraftstoffart und Ort. Ausgefüllte Felder sind orange umrandet, darüber steht, was erkannt wurde und ob die Rechnung aufgeht (Liter × €/l = Betrag, Betrag + Wäsche = Gesamt).
+- Gegenproben korrigieren typische Lesefehler, z. B. eine falsch gelesene Wäsche über Gesamt − Kraftstoff, oder fehlende Liter über Betrag ÷ €/l.
+- Felder, die du schon selbst geändert hast, werden nicht überschrieben.
+- Technik: Tesseract.js (kostenlos) läuft komplett auf dem Handy. Foto und Text verlassen das Gerät nicht. Beim ersten Auslesen lädt die App einmalig die Erkennungsdateien (ca. 10 MB) von cdn.jsdelivr.net, danach funktioniert es auch offline.
+- Tipp für gute Ergebnisse: Quittung flach und gerade von oben fotografieren, möglichst ohne Schatten.
 
 ## Neu in 0.3 – Autowäsche und Service
 
@@ -68,6 +76,7 @@ Anders als in der Belegbox gibt es hier kein Passwort und keine Verschlüsselung
 |---|---|
 | `index.html` | Seite und Gestaltung |
 | `app.js` | gesamte App-Logik |
+| `ocr.js` | Quittung auslesen (Bildaufbereitung, Werte erkennen) |
 | `ds.js` | gemeinsamer Baustein aller Boxen (jetzt mit MyTankBox in „Meine Boxen“) |
 | `sw.js` | Service Worker (offline nutzbar, Update-Hinweis) |
 | `manifest.webmanifest` | Name, Farben, Icons |
