@@ -2,7 +2,7 @@
 // Eigene Namen je Adresse: Live unter / wie bisher, eine Test-App unter /test/ mit Präfix „test-“
 const SCOPE_PATH = new URL(self.registration.scope).pathname;
 const NS = SCOPE_PATH === '/' ? '' : SCOPE_PATH.replace(/^\/|\/$/g, '').replace(/[^a-z0-9]+/gi, '-').toLowerCase() + '-';
-const CACHE = NS + 'tankbox-0.7.0.1';
+const CACHE = NS + 'tankbox-0.7.1.1';
 const FILES = ['./', 'index.html', 'app.js', 'ocr.js', 'ds.js', 'manifest.webmanifest',
   'boxen/smartbox.png', 'boxen/gesundbox.png', 'boxen/belegbox.png', 'boxen/tankbox.png',
   'icons/tankbox-192.png', 'icons/tankbox-512.png', 'icons/tankbox-maskable-192.png', 'icons/tankbox-maskable-512.png',

@@ -1,4 +1,8 @@
-# MyTankBox – Test-App 0.7.0.1
+# MyTankBox – Test-App 0.7.1.1
+
+## Neu in 0.7.1
+
+- „Tankstellen in der Nähe“ ist jetzt ein Symbolknopf oben rechts neben dem Menü (Stecknadel mit Zapfsäule) und von jedem Tab aus erreichbar. Die große Schaltfläche auf der Übersicht entfällt.
 
 ## Neu in 0.7 – Tankstellenliste aus GitHub
 

@@ -1,6 +1,6 @@
 (function(){
 'use strict';
-const APP_VERSION='0.7.0.1';
+const APP_VERSION='0.7.1.1';
 /* Eigener Speicher je Adresse: die Live-App unter / behält ihre Namen, eine Test-App unter /test/ bekommt eigene */
 const BASE=location.pathname.replace(/[^/]*$/,'');
 const NS=BASE==='/'?'':BASE.replace(/^\/|\/$/g,'').replace(/[^a-z0-9]+/gi,'-').toLowerCase()+'-';
@@ -340,7 +340,6 @@ function render(){
   main.querySelectorAll('[data-fill]').forEach(b=>b.onclick=()=>openDetail(b.dataset.fill));
   main.querySelectorAll('[data-svc]').forEach(b=>b.onclick=()=>openSvcDetail(b.dataset.svc));
   main.querySelectorAll('[data-due]').forEach(b=>b.onclick=()=>openSvcForm(null,b.dataset.due));
-  const nearB=main.querySelector('[data-near]');if(nearB)nearB.onclick=()=>openNear();
   const rm=main.querySelector('[data-bk]');if(rm)rm.onclick=()=>openMenu('gh');
   const nb=main.querySelector('[data-new]');if(nb)nb.onclick=()=>openForm(null,nb.dataset.new==='foto');
   const all=main.querySelector('[data-all]');if(all)all.onclick=()=>goTab('liste');
@@ -364,7 +363,6 @@ function viewHome(s){
         <div class="fact"><b class="num"${s.per100!=null?` data-count="p100" data-v="${s.per100}" data-f="eur"`:''}>${s.per100!=null?eur(s.per100):'–'}</b><span>Sprit pro 100 km</span></div>
         <div class="fact"><b class="num"${s.kmNow!=null?` data-count="km" data-v="${s.kmNow}" data-f="n0"`:''}>${s.kmNow!=null?nf(s.kmNow,0):'–'}</b><span>km-Stand</span></div>
       </div></div>
-    <button type="button" class="nearbtn" data-near>${svg('pump','')}<span><b>Tankstellen in der Nähe</b><small>mit Shell-Card-Akzeptanz</small></span><span class="nb-arrow" aria-hidden="true">›</span></button>
     ${dueHtml()}
     <div><div class="sechead"><h2>Zuletzt</h2><button type="button" class="ghost" data-all>Alle ${allEntries().length}</button></div>
       <div class="list" style="margin-top:10px">${recent.map((f,i)=>entryRow(f,s.c,i)).join('')}</div></div>
@@ -1177,6 +1175,7 @@ function tstep(){traf=0;
 
 /* ---------- Start ---------- */
 document.getElementById('menuBtn').onclick=()=>openMenu();
+document.getElementById('nearBtn').onclick=()=>{setFan(false);openNear()};
 document.getElementById('menuBtn').addEventListener('click',()=>setFan(false));
 if(IS_TEST){document.title='MyTankBox TEST';const h=document.querySelector('.brand h1');if(h)h.insertAdjacentHTML('beforeend',' <span class="testtag">TEST</span>')}
 (async()=>{
