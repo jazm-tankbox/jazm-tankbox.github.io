@@ -1,4 +1,14 @@
-# MyTankBox – Test-App 0.5.0.1
+# MyTankBox – Test-App 0.5.2.1
+
+## Neu in 0.5.2
+
+- Adresse der Tankstelle wird zuverlässiger gelesen: mehr Zeilen durchsucht, Straße auch ohne „Straße“ im Namen (z. B. „Am Kreuz 3“), Straße und PLZ in einer Zeile, „D-59192“, verlesene PLZ („59l92“), Hausnummern wie „4-6“, „Tel.“ hinter dem Ort wird abgeschnitten.
+- Marken-Erkennung: „TotalEnergies“ wird erkannt, „Str.“ wird nicht mehr fälschlich als Star gewertet.
+- Die gelesene Adresse steht in der „Erkannt“-Zeile, darunter der Link „Erkannten Text anzeigen“ zur Fehlersuche.
+
+## Neu in 0.5.1
+
+- Die Zahlen in den Kacheln der Übersicht passen sich der Kachelbreite an, der km-Stand ragt nicht mehr heraus.
 
 Tankungen des Dienstwagens mit Quittungsfoto erfassen, Verbrauch und Kosten auswerten. Alle Daten bleiben auf dem Handy. Es gibt keinen Server. Einzige mögliche Verbindungen: die optionale automatische Sicherung in dein eigenes privates GitHub-Repo, das App-Update in das App-Repo und das einmalige Laden der Texterkennung (nur Programmdateien, keine Daten von dir).
 

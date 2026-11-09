@@ -17,18 +17,19 @@ const BRANDLIST=[['Aral','ARAL'],['Shell','SHELL'],['Esso','ESSO'],['JET','JET']
 function lev(a,b){const m=a.length,n=b.length;if(Math.abs(m-n)>2)return 9;let p=Array.from({length:n+1},(_,j)=>j);
   for(let i=1;i<=m;i++){const c=[i];for(let j=1;j<=n;j++)c[j]=Math.min(p[j]+1,c[j-1]+1,p[j-1]+(a[i-1]===b[j-1]?0:1));p=c}return p[n]}
 const deDigit=t=>t.toUpperCase().replace(/5/g,'S').replace(/0/g,'O').replace(/1/g,'I').replace(/3/g,'E').replace(/8/g,'B').replace(/4/g,'A').replace(/[^A-ZÄÖÜ]/g,'');
-function matchBrand(tok){const t=deDigit(tok);if(t.length<2)return '';
+function matchBrand(tok,loose){const t=deDigit(tok);if(t.length<2)return '';
   for(const [n,k] of BRANDLIST){if(t===k)return n}
-  for(const [n,k] of BRANDLIST){if(k.length>=4&&t.length>=3&&lev(t,k)<=1)return n}
+  for(const [n,k] of BRANDLIST){if(k.length>=4&&t.length>=5&&t.startsWith(k))return n}
+  for(const [n,k] of BRANDLIST){if(k.length>=4&&t.length>=(loose?3:4)&&lev(t,k)<=1)return n}
   // Anfangsbuchstabe falsch gelesen (E→I wie „1550“ für ESSO)
   for(const [n,k] of BRANDLIST){if(k.length>=4&&t.length===k.length&&t.slice(1)===k.slice(1))return n}
   return ''}
 function findBrand(lines){
   const clean=l=>l.replace(/euro\s?shell|shell\s?(card|flot)|dkv|uta\b|routex|aral\s?card/ig,' ');
   // 1) Kopfzeilen, 2) „X Station“, 3) „X Deutschland GmbH“ im Kleingedruckten
-  for(const l of lines.slice(0,8).map(clean)){for(const tok of l.split(/[\s,.:;()/]+/)){const b=matchBrand(tok);if(b&&tok.length<=12)return b}}
-  for(const l of lines.map(clean)){const m=l.match(/([A-Za-z0-9]{2,12})\s+(?:station|tankstelle)\b/i);if(m){const b=matchBrand(m[1]);if(b)return b}}
-  for(const l of lines.map(clean)){const m=l.match(/([A-Za-z0-9]{2,12})\s+(?:deutschland|germany)\s+g\w{2,3}h/i);if(m){const b=matchBrand(m[1]);if(b)return b}}
+  for(const l of lines.slice(0,8).map(clean)){for(const tok of l.split(/[\s,.:;()/]+/)){const b=matchBrand(tok);if(b&&tok.length<=16)return b}}
+  for(const l of lines.map(clean)){const m=l.match(/([A-Za-z0-9]{2,12})\s+(?:station|tankstelle)\b/i);if(m){const b=matchBrand(m[1],true);if(b)return b}}
+  for(const l of lines.map(clean)){const m=l.match(/([A-Za-z0-9]{2,12})\s+(?:deutschland|germany)\s+g\w{2,3}h/i);if(m){const b=matchBrand(m[1],true);if(b)return b}}
   return ''}
 const streetKey=s=>String(s||'').toLowerCase().replace(/stra(ss|ß)e|str\.?/g,'str').replace(/\d.*$/,'').replace(/[^a-zäöüß]/g,'');
 
@@ -83,11 +84,23 @@ function parse(text){
   /* Tankstelle: Marke (auch unscharf, z. B. „E5S0“ = Esso) + Adresse */
   const brand=findBrand(lines);
   let ort='',plz='',strasse='';
-  for(let i=0;i<Math.min(lines.length,18);i++){const m=lines[i].match(/\b(\d{5})\s+([A-ZÄÖÜ][A-Za-zÄÖÜäöüß.\- ]{2,30})/);
-    if(m){plz=m[1];ort=m[2].trim().replace(/\s+\d.*$/,'');
-      for(let j=i-1;j>=Math.max(0,i-3);j--){const sm=lines[j].match(/([A-ZÄÖÜ][A-Za-zÄÖÜäöüß.\- ]*?(?:stra(?:ss|ß)e|str\.?|weg|allee|platz|ring|damm|chaussee|gasse|ufer|landstr\w*)[a-z]*)\s*(\d{1,4}\s?[a-zA-Z]?)?\b/i);
-        if(sm){strasse=(sm[1].replace(/strasse\b/i,'straße').replace(/strass[oa0]\b/i,'straße')+(sm[2]?' '+sm[2].replace(/\s/g,''):'')).trim();break}}
-      break}}
+  const SUF="(?:[Ss]tra(?:ss|ß|s)[eoa0]|[Ss]tr\\.?|[Ww]eg|[Aa]llee|[Pp]latz|[Rr]ing|[Dd]amm|[Cc]haussee|[Gg]asse|[Uu]fer|[Mm]arkt|[Hh]of|[Pp]fad|[Ll]andstr\\w*)";
+  const STREET=new RegExp("((?:[A-ZÄÖÜ][a-zäöüß]*\\.?[\\s-]){0,3}[A-ZÄÖÜ]?[a-zäöüß-]*"+SUF+")\\s*(\\d{1,4}\\s?[a-z]?\\b(?:\\s?-\\s?\\d{1,4})?)?");
+  const fixStreet=(n,h)=>(n.replace(/stra(?:ss|s)[eoa0]$/i,'straße').replace(/\s+/g,' ').trim()+(h?' '+h.replace(/\s/g,''):'')).trim();
+  const digitsFix=t=>t.replace(/[Oo]/g,'0').replace(/[lI|]/g,'1');
+  for(let i=0;i<Math.min(lines.length,25);i++){
+    const L=lines[i].replace(/\b[DO0]\s?-\s?(?=\d{5})/,'');
+    const m=L.match(/(?:^|[\s,])([0-9OolI]{5})\s+([A-ZÄÖÜ][A-Za-zÄÖÜäöüß.\-]+(?:[ -][A-ZÄÖÜa-zäöüß(][A-Za-zÄÖÜäöüß.\-)]*){0,3})/);
+    if(!m||(m[1].match(/\d/g)||[]).length<3)continue;
+    const pz=digitsFix(m[1]);if(!/^\d{5}$/.test(pz)||pz<'01000')continue;
+    plz=pz;ort=m[2].replace(/\s+(?:Tel|Fax|Telefon|St\.?-?Nr|USt|www)\b.*$/i,'').replace(/[.,\-\s]+$/,'').trim();
+    // Straße: gleiche Zeile vor der PLZ, sonst bis zu 4 Zeilen darüber
+    const before=L.slice(0,m.index).trim();const cand=before?[before]:[];
+    for(let j=i-1;j>=Math.max(0,i-4);j--)cand.push(lines[j]);
+    for(const c of cand){const sm=c.match(STREET);if(sm&&sm[1].replace(/[^A-Za-zäöüß]/g,'').length>=4){strasse=fixStreet(sm[1],sm[2]);break}}
+    // ohne Straßen-Wort: „Am Kreuz 3“ direkt über der PLZ
+    if(!strasse)for(const c of cand.slice(before?1:0,before?2:1)){const sm=c&&c.match(/^([A-ZÄÖÜ][A-Za-zäöüß.\- ]{2,40}?)\s(\d{1,4}\s?[a-z]?)$/);if(sm&&!/tel|fax|station|gmbh/i.test(sm[1])){strasse=fixStreet(sm[1],sm[2]);break}}
+    break}
   if(brand)r.marke=brand;
   if(plz){r.plz=plz;r.ort=ort;if(strasse)r.strasse=strasse;r.adresse=[strasse,plz+' '+ort].filter(Boolean).join(', ')}
   if(brand||ort)r.station=[brand,ort].filter(Boolean).join(' ');

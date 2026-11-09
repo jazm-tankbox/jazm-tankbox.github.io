@@ -1,6 +1,6 @@
 (function(){
 'use strict';
-const APP_VERSION='0.5.0.1';
+const APP_VERSION='0.5.2.1';
 /* Eigener Speicher je Adresse: die Live-App unter / behält ihre Namen, eine Test-App unter /test/ bekommt eigene */
 const BASE=location.pathname.replace(/[^/]*$/,'');
 const NS=BASE==='/'?'':BASE.replace(/^\/|\/$/g,'').replace(/[^a-z0-9]+/gi,'-').toLowerCase()+'-';
@@ -343,8 +343,12 @@ function render(){
   const rm=main.querySelector('[data-bk]');if(rm)rm.onclick=()=>openMenu('gh');
   const nb=main.querySelector('[data-new]');if(nb)nb.onclick=()=>openForm(null,nb.dataset.new==='foto');
   const all=main.querySelector('[data-all]');if(all)all.onclick=()=>goTab('liste');
-  countUps(first);first=false;
+  countUps(first);first=false;fitFacts();setTimeout(fitFacts,1000);
 }
+/* Zahlen in den Kacheln verkleinern, bis sie hineinpassen */
+function fitFacts(){main.querySelectorAll('.fact b').forEach(b=>{b.style.fontSize='';const max=b.parentElement.clientWidth-24;
+  let fs=parseFloat(getComputedStyle(b).fontSize);while(b.scrollWidth>max&&fs>11){fs-=.5;b.style.fontSize=fs+'px'}})}
+addEventListener('resize',()=>{clearTimeout(fitFacts.t);fitFacts.t=setTimeout(fitFacts,150)});
 function viewHome(s){
   const recent=timeline().slice(0,5);
   if(!db.fills.length&&!db.services.length)return `<section class="view">
@@ -737,12 +741,17 @@ function openForm(id,withPhoto){
       if(r.sorte&&SORTEN.includes(r.sorte))put('sorte',r.sorte);
       const known=findStation(r.plz,r.strasse);
       if(known){put('station',known.name);put('adresse',known.adresse);if(known.name)got.push(known.name+' (bekannt)')}
-      else{put('station',r.station);put('adresse',r.adresse);if(r.station)got.push(r.station)}
+      else{put('station',r.station);if(put('adresse',r.adresse))got.push(r.adresse);else if(r.station)got.push(r.station)}
       live();buzz(got.length?[8,40,8]:[20,40,20]);
       const miss=[!r.km&&'Kilometerstand',!r.liter&&'Liter',!r.betrag&&'Betrag'].filter(Boolean);
       focr.className='hint '+(miss.length||!r.ok?'ocrwarn':'ocrok');
       focr.innerHTML=got.length?`<b>Erkannt:</b> ${esc(got.join(' · '))}.`+(miss.length?` <b>Nicht gefunden:</b> ${esc(miss.join(', '))} – bitte ergänzen.`:r.ok&&r.sumOk!==false?' Rechnung geht auf ✓ Bitte kurz prüfen.':' Bitte prüfen.')
         :'Auf dem Foto wurde nichts Brauchbares erkannt. Tipp: Quittung flach hinlegen, gerade von oben fotografieren, ohne Schatten.';
+      focr.insertAdjacentHTML('beforeend',' <button type="button" class="linkbtn" id="ocrTxt">Erkannten Text anzeigen</button>');
+      focr.querySelector('#ocrTxt').onclick=()=>{let d=document.getElementById('ocrdlg');
+        if(!d){d=document.createElement('dialog');d.id='ocrdlg';d.className='dsdlg';document.body.appendChild(d)}
+        d.innerHTML=`<h2>Erkannter Text</h2><p class="ds-dlg-intro">So hat die Texterkennung die Quittung gelesen. Wenn etwas nicht übernommen wird, schick einen Screenshot davon.</p><pre class="ocrpre">${esc(r.text||'')}</pre><div class="dsrow"><button type="button" class="ds-btn pri" id="ocrX">Schließen</button></div>`;
+        d.querySelector('#ocrX').onclick=()=>d.close();d.showModal()};
       const first=fm.querySelector('.field.no, input:placeholder-shown[required]');if(miss.length&&first&&first.focus)first.focus()};
     s.querySelector('#fcam').addEventListener('change',e=>pick(e.target));s.querySelector('#fgal').addEventListener('change',e=>pick(e.target));
     rm.onclick=()=>{newFoto=null;fotoGone=true;showFoto()};
