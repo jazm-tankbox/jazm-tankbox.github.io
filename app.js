@@ -1,6 +1,6 @@
 (function(){
 'use strict';
-const APP_VERSION='0.5.3.1';
+const APP_VERSION='0.6.0.1';
 /* Eigener Speicher je Adresse: die Live-App unter / behält ihre Namen, eine Test-App unter /test/ bekommt eigene */
 const BASE=location.pathname.replace(/[^/]*$/,'');
 const NS=BASE==='/'?'':BASE.replace(/^\/|\/$/g,'').replace(/[^a-z0-9]+/gi,'-').toLowerCase()+'-';
@@ -340,6 +340,7 @@ function render(){
   main.querySelectorAll('[data-fill]').forEach(b=>b.onclick=()=>openDetail(b.dataset.fill));
   main.querySelectorAll('[data-svc]').forEach(b=>b.onclick=()=>openSvcDetail(b.dataset.svc));
   main.querySelectorAll('[data-due]').forEach(b=>b.onclick=()=>openSvcForm(null,b.dataset.due));
+  const nearB=main.querySelector('[data-near]');if(nearB)nearB.onclick=()=>openNear();
   const rm=main.querySelector('[data-bk]');if(rm)rm.onclick=()=>openMenu('gh');
   const nb=main.querySelector('[data-new]');if(nb)nb.onclick=()=>openForm(null,nb.dataset.new==='foto');
   const all=main.querySelector('[data-all]');if(all)all.onclick=()=>goTab('liste');
@@ -363,6 +364,7 @@ function viewHome(s){
         <div class="fact"><b class="num"${s.per100!=null?` data-count="p100" data-v="${s.per100}" data-f="eur"`:''}>${s.per100!=null?eur(s.per100):'–'}</b><span>Sprit pro 100 km</span></div>
         <div class="fact"><b class="num"${s.kmNow!=null?` data-count="km" data-v="${s.kmNow}" data-f="n0"`:''}>${s.kmNow!=null?nf(s.kmNow,0):'–'}</b><span>km-Stand</span></div>
       </div></div>
+    <button type="button" class="nearbtn" data-near>${svg('pump','')}<span><b>Tankstellen in der Nähe</b><small>mit Shell-Card-Akzeptanz</small></span><span class="nb-arrow" aria-hidden="true">›</span></button>
     ${dueHtml()}
     <div><div class="sechead"><h2>Zuletzt</h2><button type="button" class="ghost" data-all>Alle ${allEntries().length}</button></div>
       <div class="list" style="margin-top:10px">${recent.map((f,i)=>entryRow(f,s.c,i)).join('')}</div></div>
@@ -674,6 +676,70 @@ function stationsHtml(){
   return `<div class="stlist">${list.map(st=>`<button type="button" class="strow" data-st="${db.stationen.indexOf(st)}">${badge(st)}<span><b>${esc(st.name)}</b><small>${esc(st.adresse||'ohne Adresse')} · ${used.get(st)||0}×</small></span></button>`).join('')}</div>`}
 
 
+/* ---------- Tankstellen in der Nähe (OpenStreetMap / Overpass), gefiltert nach Shell-Card-Akzeptanz ----------
+   Akzeptanz laut Shell-Übersicht „Partnerakzeptanzen der Shell Card“ (Stand August 2023), in den Einstellungen änderbar. */
+const CARD_BRANDS=[
+  {k:'shell',n:'Shell',re:/\bshell\b/i},
+  {k:'esso',n:'Esso',re:/\besso\b/i},
+  {k:'eni',n:'Agip / Eni',re:/\b(eni|agip)\b/i},
+  {k:'avia',n:'AVIA',re:/\bavia\b/i},
+  {k:'omv',n:'OMV',re:/\bomv\b/i},
+  {k:'westfalen',n:'Westfalen',re:/\bwestfalen\b/i},
+  {k:'orlen',n:'star / ORLEN',re:/\b(star|orlen)\b/i}];
+const OVERPASS=['https://overpass-api.de/api/interpreter','https://overpass.kumi.systems/api/interpreter'];
+const cardOn=()=>{const m=db.meta.cardBrands;return Array.isArray(m)?m:CARD_BRANDS.map(b=>b.k)};
+const brandOf=t=>{const s=[t.brand,t.name,t.operator].filter(Boolean).join(' ');for(const b of CARD_BRANDS)if(b.re.test(s))return b;return null};
+const distKm=(a,b,c,d)=>{const R=6371,r=x=>x*Math.PI/180,dl=r(c-a),dn=r(d-b);const h=Math.sin(dl/2)**2+Math.cos(r(a))*Math.cos(r(c))*Math.sin(dn/2)**2;return 2*R*Math.asin(Math.sqrt(h))};
+const fmtDist=k=>k<1?Math.round(k*1000/10)*10+' m':nf(k,k<10?1:0)+' km';
+let nearState={r:10,only:true,pos:null,list:null,err:'',busy:false};
+function getPos(){return new Promise((res,rej)=>{if(!navigator.geolocation){rej(new Error('Dieses Gerät kann den Standort nicht bestimmen.'));return}
+  navigator.geolocation.getCurrentPosition(p=>res({lat:p.coords.latitude,lon:p.coords.longitude,acc:p.coords.accuracy}),
+    e=>rej(new Error(e.code===1?'Standortzugriff wurde abgelehnt. Erlaube ihn in den Browser-Einstellungen für diese App.':'Standort konnte nicht bestimmt werden. Ist GPS an?')),
+    {enableHighAccuracy:true,timeout:15000,maximumAge:120000})})}
+async function overpass(lat,lon,rKm){
+  const q=`[out:json][timeout:25];nwr["amenity"="fuel"](around:${Math.round(rKm*1000)},${lat.toFixed(5)},${lon.toFixed(5)});out center tags;`;
+  let last;for(const u of OVERPASS){try{const r=await fetch(u,{method:'POST',body:'data='+encodeURIComponent(q),headers:{'Content-Type':'application/x-www-form-urlencoded'}});
+      if(!r.ok)throw new Error('HTTP '+r.status);const j=await r.json();return j.elements||[]}catch(e){last=e}}
+  throw last||new Error('offline')}
+function nearItems(){
+  const {pos,list}=nearState;if(!pos||!list)return [];
+  return list.map(e=>{const t=e.tags||{},lat=e.lat??(e.center&&e.center.lat),lon=e.lon??(e.center&&e.center.lon);if(lat==null)return null;
+    const b=brandOf(t);const street=[t['addr:street'],t['addr:housenumber']].filter(Boolean).join(' ');
+    return {id:e.type+e.id,lat,lon,d:distKm(pos.lat,pos.lon,lat,lon),brand:b,name:t.brand||t.name||t.operator||'Tankstelle',
+      label:(t.brand&&t.name?(t.name.toLowerCase().includes(t.brand.toLowerCase())?t.name:t.brand+' · '+t.name):(t.brand||t.name))||t.operator||'Tankstelle',
+      addr:[street,[t['addr:postcode'],t['addr:city']].filter(Boolean).join(' ')].filter(Boolean).join(', '),
+      open:t.opening_hours||'',ok:!!(b&&cardOn().includes(b.k))}}).filter(Boolean).sort((a,b)=>a.d-b.d)}
+function nearHtml(){
+  const st=nearState,items=nearItems(),shown=st.only?items.filter(x=>x.ok):items,hidden=items.length-shown.length;
+  return `<div class="nearctl">
+      <div class="seg" role="radiogroup" aria-label="Umkreis">${[5,10,25].map(r=>`<button type="button" data-r="${r}" aria-pressed="${st.r===r}">${r} km</button>`).join('')}</div>
+      <label class="check"><input type="checkbox" id="nOnly"${st.only?' checked':''}> nur mit Shell Card</label></div>
+    ${st.busy?'<p class="hint">⏳ Suche Tankstellen …</p>':st.err?`<div class="note">${esc(st.err)}</div>`:!st.list?'':
+      shown.length?`<div class="list">${shown.map((x,i)=>{const known=db.stationen.find(s=>x.brand&&new RegExp(x.brand.re.source,'i').test(s.name)&&s.adresse&&x.addr&&TankOCR&&s.plz&&x.addr.includes(s.plz)&&TankOCR.lev(TankOCR.streetKey(x.addr.split(',')[0]),s.key)<=2);
+        return `<div class="row near" style="--j:${i}">${badge(known,x.brand?x.brand.n.split(' ')[0]:x.name)}<span class="main"><span class="t">${esc(known?known.name:x.label)}</span>
+          <span class="s">${esc(x.addr||'Adresse unbekannt')}</span>
+          <span class="s">${x.ok?'<span class="pill ok">Shell Card</span> ':x.brand?'':'<span class="pill">Akzeptanz unbekannt</span> '}${x.open==='24/7'?'24 h geöffnet':x.open?esc(x.open.length>40?x.open.slice(0,40)+'…':x.open):''}</span></span>
+          <span class="ramt"><b class="num">${fmtDist(x.d)}</b><a class="ghost sm" href="https://www.google.com/maps/dir/?api=1&destination=${x.lat},${x.lon}" target="_blank" rel="noopener noreferrer">Route</a></span></div>`}).join('')}</div>`
+      :`<div class="list"><div class="empty">Keine passende Tankstelle im Umkreis von ${st.r} km.${hidden?' Größeren Umkreis wählen oder Filter ausschalten.':''}</div></div>`}
+    ${st.list&&!st.busy&&!st.err?`<p class="hint">${shown.length} von ${items.length} Tankstellen${hidden&&st.only?` · ${hidden} ohne Shell-Card-Akzeptanz ausgeblendet`:''}. Akzeptanz nach Marke (Stand der Shell-Übersicht 08/2023, unter Daten → Tankstellen änderbar). Einzelne Stationen können abweichen.</p>`:''}
+    <p class="hint">Für die Suche wird dein ungefährer Standort an OpenStreetMap (Overpass-Server) gesendet. Kartendaten © OpenStreetMap-Mitwirkende.</p>`}
+function openNear(){
+  openSheet(head('Tankstellen in der Nähe')+'<div id="nearBody"></div>',async s=>{
+    const body=s.querySelector('#nearBody');
+    const draw=()=>{body.innerHTML=nearHtml();
+      body.querySelectorAll('[data-r]').forEach(b=>b.onclick=()=>{nearState.r=+b.dataset.r;buzz(4);search()});
+      body.querySelector('#nOnly').onchange=e=>{nearState.only=e.target.checked;draw()}};
+    const search=async()=>{nearState.busy=true;nearState.err='';draw();
+      try{nearState.pos=await getPos();nearState.list=await overpass(nearState.pos.lat,nearState.pos.lon,nearState.r)}
+      catch(e){nearState.err=e&&e.message&&!/^HTTP|fetch|offline/i.test(e.message)?e.message:'Die Tankstellen-Daten konnten nicht geladen werden. Besteht eine Internetverbindung?'}
+      nearState.busy=false;if(body.isConnected)draw()};
+    draw();search();
+  });
+}
+function cardBrandsHtml(){const on=cardOn();
+  return `<div class="ds-lbl sep">Shell-Card-Akzeptanz</div><p class="ds-hint">Für „Tankstellen in der Nähe“: An diesen Marken kannst du mit der Shell Card tanken (laut Shell-Übersicht, Stand 08/2023). Passe die Liste an, falls sich etwas ändert.</p>
+    <div class="cbgrid">${CARD_BRANDS.map(b=>`<label class="check"><input type="checkbox" data-cb="${b.k}"${on.includes(b.k)?' checked':''}> ${b.n}</label>`).join('')}</div>`}
+
 /* ---------- Formular ---------- */
 async function shrink(file){
   const bmp=await createImageBitmap(file).catch(()=>null);
@@ -895,7 +961,7 @@ function openMenu(open){
     :`<p class="ds-hint">Neue Versionen als Zip direkt aus der App veröffentlichen. Dafür brauchst du einen eigenen Zugangsschlüssel nur für das App-Repo.</p>
     <div class="ds-acts"><button type="button" class="ds-btn pri" id="up_chg">GitHub verbinden</button></div>`}
     <div id="updStatus" class="ds-box"${UPD?'':' hidden'}>${UPD}</div>`,!!UPD)
-  +mAcc('stat','pump','Tankstellen',db.stationen.length+' gemerkt · Abzeichen & Bilder',`<p class="ds-hint">Tippe eine Tankstelle an, um Name, Farbe oder ein eigenes Bild (z. B. Foto vom Schild) festzulegen.</p>${stationsHtml()}`)
+  +mAcc('stat','pump','Tankstellen',db.stationen.length+' gemerkt · Abzeichen & Bilder',`<p class="ds-hint">Tippe eine Tankstelle an, um Name, Farbe oder ein eigenes Bild (z. B. Foto vom Schild) festzulegen.</p>${stationsHtml()}${cardBrandsHtml()}`)
   +mAcc('look','sun','Darstellung',({auto:'Automatisch',light:'Hell',dark:'Dunkel'})[DS.getTheme()]+' · hell oder dunkel',`<div class="ds-lbl">Hell oder dunkel</div>${DS.themeHtml()}`)
   +mAcc('eintr','list','Einträge',db.fills.length+' Tankung'+(db.fills.length===1?'':'en')+(db.services.length?' · '+db.services.length+' Service':''),`
     <p class="ds-hint">Löscht alle Tankungen und Fotos auf diesem Handy. In GitHub bleibt alles liegen. Das lässt sich nicht rückgängig machen.</p>
@@ -931,6 +997,7 @@ function openMenu(open){
     const ghX=s.querySelector('#ghOff');if(ghX)ghX.onclick=()=>{if(!confirm('GitHub-Sicherung trennen? Im Repo bleibt alles liegen.'))return;
       setKeys({gh:null});setGhStat({err:'',at:0,conflict:false});openMenu('gh');toast('GitHub-Sicherung getrennt.')};
     bindUpd(s);
+    s.querySelectorAll('[data-cb]').forEach(c=>c.onchange=async()=>{db.meta.cardBrands=[...s.querySelectorAll('[data-cb]:checked')].map(x=>x.dataset.cb);await save();buzz(4)});
     s.querySelectorAll('[data-st]').forEach(b=>b.onclick=()=>openStation(db.stationen[+b.dataset.st],()=>openMenu('stat')));
     s.querySelector('#bkGo').onclick=async()=>{await exportBackup();if(root.firstElementChild)openMenu('gh')};
     const bi=s.querySelector('#bkIn');

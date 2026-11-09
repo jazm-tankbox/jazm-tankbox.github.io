@@ -1,4 +1,11 @@
-# MyTankBox – Test-App 0.5.3.1
+# MyTankBox – Test-App 0.6.0.1
+
+## Neu in 0.6 – Tankstellen in der Nähe
+
+- Neuer Knopf auf der Übersicht: „Tankstellen in der Nähe“. Sucht per Standort im Umkreis von 5, 10 oder 25 km, sortiert nach Entfernung, mit Adresse, Öffnungszeiten (falls bekannt) und „Route“-Link.
+- Filter „nur mit Shell Card“ (Standard an): Shell, Esso, Agip/Eni, AVIA, OMV, Westfalen, star/ORLEN – laut Shell-Übersicht „Partnerakzeptanzen der Shell Card“, Stand August 2023. Die Liste ist unter Daten → Tankstellen änderbar.
+- Gemerkte Tankstellen erscheinen mit deinem Namen und Abzeichen.
+- Daten: OpenStreetMap über den Overpass-Server (kostenlos, ohne Zugang). Dafür wird der ungefähre Standort an den Server gesendet. Nicht jede Tankstelle ist in OpenStreetMap mit Marke eingetragen.
 
 ## Neu in 0.5.3
 

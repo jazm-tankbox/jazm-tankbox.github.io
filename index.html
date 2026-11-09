@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#B4530F" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#15110E" media="(prefers-color-scheme: dark)">
 <meta name="description" content="Tankungen, Verbrauch und Kosten des Dienstwagens – auf deinem Handy.">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; worker-src 'self' blob: https://cdn.jsdelivr.net; connect-src 'self' https://api.github.com https://cdn.jsdelivr.net https://tessdata.projectnaptha.com; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; worker-src 'self' blob: https://cdn.jsdelivr.net; connect-src 'self' https://api.github.com https://cdn.jsdelivr.net https://tessdata.projectnaptha.com https://overpass-api.de https://overpass.kumi.systems; object-src 'none'; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <title>MyTankBox</title>
 <link rel="manifest" href="manifest.webmanifest">
@@ -798,6 +798,18 @@ img.stb{background:var(--sunk)}
 .stlink{display:inline-flex;align-items:center;gap:8px;padding:0;border:0;background:none;color:inherit;font:inherit;text-align:left;cursor:pointer}
 .stlink>span:not(.stb){display:flex;flex-direction:column}
 .stlink small{font-size:12.5px}
+.nearbtn{display:flex;align-items:center;gap:12px;width:100%;padding:14px 16px;border:1px solid var(--line);border-radius:16px;background:var(--surface);color:var(--ink);font:inherit;text-align:left;cursor:pointer}
+.nearbtn>svg{width:26px;height:26px;color:var(--accent);flex:none}
+.nearbtn>span:not(.nb-arrow){display:flex;flex-direction:column;flex:1;min-width:0}
+.nearbtn small{color:var(--muted);font-size:13px}
+.nb-arrow{font-size:26px;color:var(--muted);line-height:1}
+.nearctl{display:flex;flex-direction:column;gap:10px;margin-bottom:12px}
+.nearctl .seg{grid-template-columns:repeat(3,1fr)}
+.row.near{cursor:default;align-items:center}
+.row.near .ramt{display:flex;flex-direction:column;align-items:flex-end;gap:6px}
+.ghost.sm{padding:4px 10px;font-size:13px;text-decoration:none;color:var(--accent);border-color:var(--accent)}
+.pill.ok{background:var(--accent-soft);color:var(--accent)}
+.cbgrid{display:grid;grid-template-columns:1fr 1fr;gap:4px 12px}
 
 
 </style>
