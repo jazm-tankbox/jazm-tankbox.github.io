@@ -1,0 +1,72 @@
+# MyTankBox: Tankstellenliste aus OpenStreetMap laden
+# Lädt alle Tankstellen in Deutschland (amenity=fuel) und speichert sie kompakt als tankstellen.json neben der App.
+# Läuft am 1. jedes Monats und lässt sich unter „Actions“ → „Tankstellen aktualisieren“ → „Run workflow“ von Hand starten.
+# Warum hier und nicht in der App: Die Overpass-Server sperren Anfragen direkt aus Browsern, Server-Abfragen sind erlaubt.
+# Daten © OpenStreetMap-Mitwirkende, ODbL.
+name: Tankstellen aktualisieren
+run-name: Tankstellen aktualisieren
+
+on:
+  schedule:
+    - cron: "17 3 1 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+
+concurrency:
+  group: tankbox-paket
+  cancel-in-progress: false
+
+jobs:
+  laden:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Repo laden
+        uses: actions/checkout@v4
+        with: { fetch-depth: 1 }
+
+      - name: Tankstellen von OpenStreetMap holen
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          info()   { echo "::notice title=Tankstellen::$*"; }
+          fehler() { echo "::error title=Tankstellen::$*"; exit 1; }
+          UA="MyTankBox-Tankstellenliste/1.0 (+https://github.com/${GITHUB_REPOSITORY})"
+          Q='[out:json][timeout:300];area["ISO3166-1"="DE"][admin_level=2]->.de;nwr["amenity"="fuel"](area.de);out center tags;'
+          OK=""
+          for U in https://overpass.private.coffee/api/interpreter https://overpass-api.de/api/interpreter https://overpass.kumi.systems/api/interpreter; do
+            echo "Versuche $U …"
+            CODE=$(curl -sS -A "$UA" -H "Referer: https://github.com/${GITHUB_REPOSITORY}" --max-time 600 \
+              --data-urlencode "data=$Q" -o osm.json -w '%{http_code}' "$U" || echo 000)
+            if [ "$CODE" = "200" ] && jq -e '.elements | length > 5000' osm.json >/dev/null 2>&1; then OK="$U"; break; fi
+            echo "  → HTTP $CODE, nicht verwendbar."; sleep 30
+          done
+          [ -n "$OK" ] || fehler "Kein Overpass-Server hat geantwortet. Später erneut starten."
+
+          # Kompakt: [lat, lon, Marke, Name, Straße, Hausnr., PLZ, Ort, Öffnungszeiten]
+          jq -c --arg stand "$(date -u +%Y-%m-%d)" '
+            def t(k): (.tags[k] // "");
+            {stand:$stand, quelle:"OpenStreetMap (ODbL)",
+             s:[.elements[] | {lat:(.lat // .center.lat), lon:(.lon // .center.lon)} as $p | select($p.lat != null)
+               | [(($p.lat*100000|round)/100000), (($p.lon*100000|round)/100000),
+                  t("brand"), t("name"), t("addr:street"), t("addr:housenumber"), t("addr:postcode"),
+                  (t("addr:city") | if . == "" then "" else . end), t("opening_hours")]]}
+            | .n = (.s | length)' osm.json > tankstellen.neu.json || fehler "Daten konnten nicht umgewandelt werden."
+          N=$(jq '.n' tankstellen.neu.json)
+          [ "$N" -gt 5000 ] || fehler "Nur $N Tankstellen – das ist zu wenig, Datei nicht übernommen."
+
+          # Nur speichern, wenn sich die Tankstellen geändert haben (Datum allein zählt nicht)
+          if [ -f tankstellen.json ] && [ "$(jq -c '.s' tankstellen.json)" = "$(jq -c '.s' tankstellen.neu.json)" ]; then
+            info "Keine Änderungen bei den Tankstellen ($N)."; exit 0
+          fi
+          mv tankstellen.neu.json tankstellen.json
+          git config user.name "JAZM"; git config user.email "jazm1309@users.noreply.github.com"
+          git add tankstellen.json
+          git commit -q -m "Tankstellenliste aktualisiert ($N Tankstellen, Quelle $OK)"
+          git push -q origin HEAD:main || fehler "Hochladen fehlgeschlagen."
+          gh api -X POST "repos/$GITHUB_REPOSITORY/pages/builds" >/dev/null 2>&1 || true
+          info "$N Tankstellen gespeichert (Quelle $OK, $(du -h tankstellen.json | cut -f1))."
