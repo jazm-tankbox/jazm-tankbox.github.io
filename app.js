@@ -1,6 +1,6 @@
 (function(){
 'use strict';
-const APP_VERSION='0.7.1.1';
+const APP_VERSION='0.8.0.1';
 /* Eigener Speicher je Adresse: die Live-App unter / behält ihre Namen, eine Test-App unter /test/ bekommt eigene */
 const BASE=location.pathname.replace(/[^/]*$/,'');
 const NS=BASE==='/'?'':BASE.replace(/^\/|\/$/g,'').replace(/[^a-z0-9]+/gi,'-').toLowerCase()+'-';
@@ -697,36 +697,49 @@ function getPos(){
     throw new Error(e&&e.code===1?'Standortzugriff ist für die App gesperrt. Erlaube ihn: Chrome → ⋮ → Einstellungen → Website-Einstellungen → Standort, oder in den Android-Einstellungen der App.':'Standort konnte nicht bestimmt werden. Ist der Standort (GPS) am Handy eingeschaltet?')})}
 /* Tankstellenliste: wird monatlich vom GitHub-Ablauf „Tankstellen aktualisieren“ aus OpenStreetMap erzeugt.
    Die Suche läuft komplett auf dem Handy – der Standort verlässt das Gerät nicht. */
-let stP=null;
+let stP=null,shP;
+/* Shell-Akzeptanzliste (importierte CSV aus der Shell-Card-Tankstellensuche), liegt nur auf diesem Handy */
+function loadShell(){if(shP)return shP;shP=kvGet('shellListe').then(j=>j?JSON.parse(j):null).catch(()=>null);return shP}
+async function importShellCsv(file){
+  if(!window.TankStations)throw new Error('Import fehlt in diesem App-Stand.');
+  const o=TankStations.parseShellCsv(await file.text());o.stand=iso(new Date());o.datei=file.name;
+  await kvPut('shellListe',JSON.stringify(o));shP=Promise.resolve(o);db.meta.shellListe={n:o.n,stand:o.stand};await save(false,false);
+  nearState.shell=null;return o}
 function loadStations(){if(stP)return stP;
   stP=fetch('tankstellen.json',{cache:'no-cache'}).then(r=>{if(r.status===404)throw Object.assign(new Error('fehlt'),{missing:true});if(!r.ok)throw new Error('HTTP '+r.status);return r.json()})
     .then(j=>{if(!j||!Array.isArray(j.s))throw new Error('ungültig');return j});
   stP.catch(()=>{stP=null});return stP}
 function nearItems(){
-  const {pos,list,r}=nearState;if(!pos||!list)return [];
-  // grobe Vorauswahl über ein Rechteck, dann genaue Entfernung
+  const {pos,list,shell,r}=nearState;if(!pos||(!list&&!shell))return [];
   const dLat=r/111,dLon=r/(111*Math.cos(pos.lat*Math.PI/180));
-  return list.filter(a=>Math.abs(a[0]-pos.lat)<=dLat&&Math.abs(a[1]-pos.lon)<=dLon).map(a=>{
-    const [lat,lon,brand,name,str,hnr,plz,city,oh]=a,t={brand,name,'addr:street':str,'addr:housenumber':hnr,'addr:postcode':plz,'addr:city':city,opening_hours:oh};
-    const b=brandOf(t);const street=[t['addr:street'],t['addr:housenumber']].filter(Boolean).join(' ');
-    return {id:lat+','+lon,lat,lon,d:distKm(pos.lat,pos.lon,lat,lon),brand:b,name:t.brand||t.name||t.operator||'Tankstelle',
-      label:(t.brand&&t.name?(t.name.toLowerCase().includes(t.brand.toLowerCase())?t.name:t.brand+' · '+t.name):(t.brand||t.name))||t.operator||'Tankstelle',
-      addr:[street,[t['addr:postcode'],t['addr:city']].filter(Boolean).join(' ')].filter(Boolean).join(', '),
-      open:t.opening_hours||'',ok:!!(b&&cardOn().includes(b.k))}}).filter(x=>x.d<=r).sort((a,b)=>a.d-b.d)}
+  const box=a=>Math.abs(a[0]-pos.lat)<=dLat&&Math.abs(a[1]-pos.lon)<=dLon;
+  const out=[];
+  if(shell){for(const a of shell.s){if(!box(a))continue;const [lat,lon,brand,addr,plz,city,fl,tel]=a,d=distKm(pos.lat,pos.lon,lat,lon);if(d>r)continue;
+    out.push({id:'s'+lat+','+lon,lat,lon,d,src:'shell',brand:brand?{n:brand,re:new RegExp('\\b'+brand.replace(/[^\w]/g,'')+'\\b','i')}:null,name:brand||'Tankstelle',
+      label:(brand||'Tankstelle')+' '+city,addr:[addr,[plz,city].filter(Boolean).join(' ')].filter(Boolean).join(', '),open:fl&1?'24/7':'',adblue:!!(fl&2),wash:!!(fl&4),tel,ok:true})}}
+  // OpenStreetMap: mit Shell-Liste nur als Ergänzung (Filter aus), sonst wie bisher nach Marke
+  if(list&&(!shell||!nearState.only)){for(const a of list){if(!box(a))continue;
+    const [lat,lon,brand,name,str,hnr,plz,city,oh]=a,d=distKm(pos.lat,pos.lon,lat,lon);if(d>r)continue;
+    if(shell&&out.some(x=>x.src==='shell'&&distKm(lat,lon,x.lat,x.lon)<.12))continue; // schon in der Shell-Liste
+    const t={brand,name},b=brandOf(t),street=[str,hnr].filter(Boolean).join(' ');
+    out.push({id:'o'+lat+','+lon,lat,lon,d,src:'osm',brand:b,name:brand||name||'Tankstelle',
+      label:(brand&&name?(name.toLowerCase().includes(brand.toLowerCase())?name:brand+' · '+name):(brand||name))||'Tankstelle',
+      addr:[street,[plz,city].filter(Boolean).join(' ')].filter(Boolean).join(', '),open:oh||'',ok:shell?false:!!(b&&cardOn().includes(b.k))})}}
+  return out.sort((a,b)=>a.d-b.d)}
 function nearHtml(){
   const st=nearState,items=nearItems(),all=st.only?items.filter(x=>x.ok):items,hidden=items.length-all.length,shown=all.slice(0,50);
   return `<div class="nearctl">
       <div class="seg" role="radiogroup" aria-label="Umkreis">${[5,10,25].map(r=>`<button type="button" data-r="${r}" aria-pressed="${st.r===r}">${r} km</button>`).join('')}</div>
       <label class="check"><input type="checkbox" id="nOnly"${st.only?' checked':''}> nur mit Shell Card</label></div>
-    ${st.busy?`<p class="hint">⏳ ${esc(st.step||'Suche …')}</p>`:st.err?`<div class="note">${esc(st.err)}${st.detail?`<br><small>${esc(st.detail)}</small>`:''}</div><div class="actions"><button type="button" class="btn" id="nRetry">Nochmal versuchen</button></div>`:!st.list?'':
+    ${st.busy?`<p class="hint">⏳ ${esc(st.step||'Suche …')}</p>`:st.err?`<div class="note">${esc(st.err)}${st.detail?`<br><small>${esc(st.detail)}</small>`:''}</div><div class="actions"><button type="button" class="btn" id="nRetry">Nochmal versuchen</button></div>`:!(st.list||st.shell)?'':
       shown.length?`<div class="list">${shown.map((x,i)=>{const known=db.stationen.find(s=>x.brand&&new RegExp(x.brand.re.source,'i').test(s.name)&&s.adresse&&x.addr&&TankOCR&&s.plz&&x.addr.includes(s.plz)&&TankOCR.lev(TankOCR.streetKey(x.addr.split(',')[0]),s.key)<=2);
         return `<div class="row near" role="button" tabindex="0" data-nid="${esc(x.id)}" style="--j:${i}">${badge(known,x.brand?x.brand.n.split(' ')[0]:x.name)}<span class="main"><span class="t">${esc(known?known.name:x.label)}</span>
           <span class="s">${esc(x.addr||'Adresse unbekannt')}</span>
-          <span class="s">${x.ok?'<span class="pill ok">Shell Card</span> ':x.brand?'':'<span class="pill">Akzeptanz unbekannt</span> '}${x.open==='24/7'?'24 h geöffnet':x.open?esc(x.open.length>40?x.open.slice(0,40)+'…':x.open):''}</span></span>
+          <span class="s">${x.ok?'<span class="pill ok">Shell Card</span> ':nearState.shell?'<span class="pill">nicht in Shell-Liste</span> ':x.brand?'':'<span class="pill">Akzeptanz unbekannt</span> '}${[x.open==='24/7'?'24 h':x.open?esc(x.open.length>30?x.open.slice(0,30)+'…':x.open):'',x.adblue?'AdBlue':'',x.wash?'Wäsche':''].filter(Boolean).join(' · ')}</span></span>
           <span class="ramt"><b class="num">${fmtDist(x.d)}</b><a class="ghost sm" data-route href="${routeUrl(x)}" target="_blank" rel="noopener noreferrer">Route</a></span></div>`}).join('')}</div>`
       :`<div class="list"><div class="empty">Keine passende Tankstelle im Umkreis von ${st.r} km.${hidden?' Größeren Umkreis wählen oder Filter ausschalten.':''}</div></div>`}
-    ${st.list&&!st.busy&&!st.err?`<p class="hint">${all.length>50?'Die 50 nächsten von '+all.length+' passenden. ':''}${all.length} von ${items.length} Tankstellen${hidden&&st.only?` · ${hidden} ohne Shell-Card-Akzeptanz ausgeblendet`:''}. Akzeptanz nach Marke (Stand der Shell-Übersicht 08/2023, unter Daten → Tankstellen änderbar). Einzelne Stationen können abweichen.</p>`:''}
-    <p class="hint">Die Suche läuft auf deinem Handy, dein Standort wird nicht gesendet.${st.stand?' Tankstellenliste vom '+fmtS(st.stand)+'.':''} Daten © OpenStreetMap-Mitwirkende (ODbL).</p>`}
+    ${(st.list||st.shell)&&!st.busy&&!st.err?`<p class="hint">${all.length>50?'Die 50 nächsten von '+all.length+' passenden. ':''}${all.length} von ${items.length} Tankstellen${hidden&&st.only?` · ${hidden} ohne Shell-Card-Akzeptanz ausgeblendet`:''}. ${st.shell?`Akzeptanz laut Shell-Liste vom ${fmtS(st.shell.stand)} (${nf(st.shell.n,0)} Stationen).`:'Akzeptanz nach Marke – genauer wird es mit der Shell-Liste (Daten → Tankstellen → Shell-Liste importieren).'}</p>`:''}
+    <p class="hint">Die Suche läuft auf deinem Handy, dein Standort wird nicht gesendet.${st.list?` Ergänzend OpenStreetMap${st.stand?' vom '+fmtS(st.stand):''}, © OpenStreetMap-Mitwirkende (ODbL).`:''}</p>`}
 const routeUrl=x=>`https://www.google.com/maps/dir/?api=1&amp;destination=${x.lat},${x.lon}`;
 const geoUrl=x=>`geo:${x.lat},${x.lon}?q=${x.lat},${x.lon}(${encodeURIComponent(x.label)})`;
 function openNearDetail(x){
@@ -737,7 +750,9 @@ function openNearDetail(x){
       <dt>Adresse</dt><dd>${esc(x.addr||'unbekannt')}</dd>
       <dt>Entfernung</dt><dd class="num">${fmtDist(x.d)} Luftlinie</dd>
       ${x.open?`<dt>Geöffnet</dt><dd>${x.open==='24/7'?'24 Stunden':esc(x.open)}</dd>`:''}
-      <dt>Shell Card</dt><dd>${x.ok?'<span class="pill ok">wird angenommen</span>':x.brand?'nicht in deiner Akzeptanzliste':'unbekannt (Marke fehlt in OpenStreetMap)'}</dd>
+      <dt>Shell Card</dt><dd>${x.ok?'<span class="pill ok">wird angenommen</span>':nearState.shell?'nicht in der Shell-Liste':x.brand?'nicht in deiner Akzeptanzliste':'unbekannt (Marke fehlt in OpenStreetMap)'}</dd>
+      ${x.adblue||x.wash?`<dt>Extras</dt><dd>${[x.adblue&&'AdBlue (Pkw)',x.wash&&'Waschanlage'].filter(Boolean).join(', ')}</dd>`:''}
+      ${x.tel?`<dt>Telefon</dt><dd><a href="tel:${esc(x.tel.replace(/[^\d+]/g,''))}">${esc(x.tel)}</a></dd>`:''}
     </dl>
     <div class="actions"><a class="btn primary" href="${routeUrl(x)}" target="_blank" rel="noopener noreferrer">Route starten</a><a class="btn" href="${geoUrl(x)}">In Karten-App öffnen</a></div>
     <div class="actions"><button type="button" class="btn" id="nBack">‹ Zurück zur Liste</button></div>
@@ -749,24 +764,28 @@ function openNear(keep){
     const body=s.querySelector('#nearBody');
     const draw=()=>{body.innerHTML=nearHtml();
       body.querySelectorAll('[data-r]').forEach(b=>b.onclick=()=>{nearState.r=+b.dataset.r;buzz(4);search()});
-      body.querySelector('#nOnly').onchange=e=>{nearState.only=e.target.checked;draw()};
+      body.querySelector('#nOnly').onchange=e=>{nearState.only=e.target.checked;if(!nearState.only&&!nearState.list)search();else draw()};
       const rt=body.querySelector('#nRetry');if(rt)rt.onclick=()=>search();
       const items=nearItems();
       body.querySelectorAll('[data-nid]').forEach(r=>{const go=e=>{if(e.target.closest('[data-route]'))return;const x=items.find(i=>i.id===r.dataset.nid);if(x){buzz(4);openNearDetail(x)}};
         r.onclick=go;r.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();go(e)}}})};
     const search=async()=>{const st=nearState;st.busy=true;st.err='';st.detail='';st.step='Standort wird bestimmt …';draw();
       try{st.pos=await getPos();}catch(e){st.busy=false;st.err=e.message;if(body.isConnected)draw();return}
-      if(!st.list){st.step='Tankstellenliste wird geladen …';if(body.isConnected)draw();
+      if(!st.shell)st.shell=await loadShell();
+      if(!st.list&&(!st.shell||!st.only)){st.step='Tankstellenliste wird geladen …';if(body.isConnected)draw();
         try{const j=await loadStations();st.list=j.s;st.stand=j.stand}
-        catch(e){st.err=e.missing?'Die Tankstellenliste fehlt noch im App-Repo.':navigator.onLine===false?'Keine Internetverbindung – die Tankstellenliste wurde noch nie geladen.':'Die Tankstellenliste konnte nicht geladen werden.';
-          st.detail=e.missing?'Auf GitHub im Repo jazm-tankbox.github.io: Actions → „Tankstellen aktualisieren“ → „Run workflow“. Nach 2–3 Minuten ist die Liste da.':(e.message||'')}}
+        catch(e){if(!st.shell){st.err=e.missing?'Noch keine Tankstellenliste vorhanden.':navigator.onLine===false?'Keine Internetverbindung – die Tankstellenliste wurde noch nie geladen.':'Die Tankstellenliste konnte nicht geladen werden.';
+          st.detail=e.missing?'Am einfachsten: Daten → Tankstellen → „Shell-Liste importieren“ mit der CSV von der Shell-Tankstellensuche.':(e.message||'')}}}
       st.busy=false;if(body.isConnected)draw()};
     draw();if(!(keep&&nearState.list))search();
   });
 }
-function cardBrandsHtml(){const on=cardOn();
-  return `<div class="ds-lbl sep">Shell-Card-Akzeptanz</div><p class="ds-hint">Für „Tankstellen in der Nähe“: An diesen Marken kannst du mit der Shell Card tanken (laut Shell-Übersicht, Stand 08/2023). Passe die Liste an, falls sich etwas ändert.</p>
-    <div class="cbgrid">${CARD_BRANDS.map(b=>`<label class="check"><input type="checkbox" data-cb="${b.k}"${on.includes(b.k)?' checked':''}> ${b.n}</label>`).join('')}</div>`}
+function cardBrandsHtml(){const on=cardOn(),sl=db.meta.shellListe;
+  return `<div class="ds-lbl sep">Shell-Liste (Akzeptanz je Station)</div>
+    <p class="ds-hint">${sl?`Importiert am ${fmtS(sl.stand)}: ${nf(sl.n,0)} Tankstellen, an denen die Shell Card angenommen wird. Für einen neuen Stand einfach erneut importieren.`:'Lade auf shell.de in der Tankstellensuche für Shell-Card-Kunden die CSV-Liste herunter und importiere sie hier. Dann zeigt „Tankstellen in der Nähe“ genau die Stationen, an denen die Karte angenommen wird.'}</p>
+    <div class="ds-acts"><label class="ds-btn${sl?'':' pri'}">${sl?'Neue Shell-Liste importieren':'Shell-Liste importieren (CSV)'}<input id="shIn" type="file" accept=".csv,text/csv,text/comma-separated-values,application/vnd.ms-excel" hidden></label></div>
+    ${sl?'':`<div class="ds-lbl sep">Ohne Shell-Liste: Akzeptanz nach Marke</div><p class="ds-hint">Für „Tankstellen in der Nähe“: An diesen Marken kannst du mit der Shell Card tanken (laut Shell-Übersicht, Stand 08/2023). Passe die Liste an, falls sich etwas ändert.</p>
+    <div class="cbgrid">${CARD_BRANDS.map(b=>`<label class="check"><input type="checkbox" data-cb="${b.k}"${on.includes(b.k)?' checked':''}> ${b.n}</label>`).join('')}</div>`}`}
 
 /* ---------- Formular ---------- */
 async function shrink(file){
@@ -1025,6 +1044,8 @@ function openMenu(open){
     const ghX=s.querySelector('#ghOff');if(ghX)ghX.onclick=()=>{if(!confirm('GitHub-Sicherung trennen? Im Repo bleibt alles liegen.'))return;
       setKeys({gh:null});setGhStat({err:'',at:0,conflict:false});openMenu('gh');toast('GitHub-Sicherung getrennt.')};
     bindUpd(s);
+    const shIn=s.querySelector('#shIn');if(shIn)shIn.addEventListener('change',async()=>{const f=shIn.files[0];shIn.value='';if(!f)return;
+      toast('Shell-Liste wird eingelesen …');try{const o=await importShellCsv(f);openMenu('stat');celebrate('Importiert');toast(nf(o.n,0)+' Tankstellen aus der Shell-Liste übernommen.')}catch(x){toast(x&&x.message||'Import hat nicht geklappt.')}});
     s.querySelectorAll('[data-cb]').forEach(c=>c.onchange=async()=>{db.meta.cardBrands=[...s.querySelectorAll('[data-cb]:checked')].map(x=>x.dataset.cb);await save();buzz(4)});
     s.querySelectorAll('[data-st]').forEach(b=>b.onclick=()=>openStation(db.stationen[+b.dataset.st],()=>openMenu('stat')));
     s.querySelector('#bkGo').onclick=async()=>{await exportBackup();if(root.firstElementChild)openMenu('gh')};

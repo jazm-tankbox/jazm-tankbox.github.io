@@ -1,4 +1,10 @@
-# MyTankBox – Test-App 0.7.1.1
+# MyTankBox – Test-App 0.8.0.1
+
+## Neu in 0.8 – Shell-Liste importieren
+
+- Daten → Tankstellen → „Shell-Liste importieren (CSV)“: die CSV aus der Shell-Card-Tankstellensuche auf shell.de einlesen (getestet mit 4.346 Stationen: Shell, Esso, Eni/Agip, Westfalen, Markant und weitere). Die Liste liegt nur auf dem Handy (ca. 330 KB). Für einen neuen Stand einfach erneut importieren.
+- „Tankstellen in der Nähe“ zeigt mit Filter „nur mit Shell Card“ genau die Stationen aus der Shell-Liste – mit 24 h, AdBlue, Waschanlage und Telefon, soweit angegeben. Ohne Filter kommen ergänzend die übrigen Tankstellen aus OpenStreetMap dazu (falls tankstellen.json vorhanden), markiert mit „nicht in Shell-Liste“.
+- Ohne importierte Liste gilt weiter die Akzeptanz nach Marke. Der GitHub-Ablauf „Tankstellen aktualisieren“ ist damit nur noch für die Ergänzung ohne Filter nötig.
 
 ## Neu in 0.7.1
 
@@ -132,6 +138,7 @@ Anders als in der Belegbox gibt es hier kein Passwort und keine Verschlüsselung
 | `index.html` | Seite und Gestaltung |
 | `app.js` | gesamte App-Logik |
 | `ocr.js` | Quittung auslesen (Bildaufbereitung, Werte erkennen) |
+| `stationen.js` | Shell-Liste (CSV) einlesen |
 | `ds.js` | gemeinsamer Baustein aller Boxen (jetzt mit MyTankBox in „Meine Boxen“) |
 | `sw.js` | Service Worker (offline nutzbar, Update-Hinweis) |
 | `manifest.webmanifest` | Name, Farben, Icons |
