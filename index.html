@@ -776,6 +776,25 @@ form [hidden]{display:none!important}
 #focr.ocrbusy{color:var(--accent);font-weight:600}
 #focr.ocrok{color:var(--ok)}
 #focr.ocrwarn{color:var(--warn)}
+.stb{display:inline-grid;place-items:center;flex:none;width:34px;height:34px;border-radius:50%;background:var(--stc,#64748B);color:#fff;font-weight:700;font-size:15px;object-fit:cover;line-height:1}
+.stb.sm{width:20px;height:20px;font-size:11px}
+.stb.big{width:72px;height:72px;font-size:30px}
+img.stb{background:var(--sunk)}
+.stline{display:flex;align-items:center;gap:6px;margin-top:2px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.stprev{display:flex;justify-content:center;margin:4px 0 14px}
+.stcols{display:flex;flex-wrap:wrap;gap:10px}
+.stcol{position:relative;cursor:pointer}
+.stcol input{position:absolute;opacity:0;pointer-events:none}
+.stcol span{display:block;width:34px;height:34px;border-radius:50%;background:var(--stc);box-shadow:inset 0 0 0 2px rgba(255,255,255,.25)}
+.stcol input:checked+span{outline:3px solid var(--ink);outline-offset:2px}
+.stcol input:focus-visible+span{outline:3px solid var(--accent);outline-offset:2px}
+.stlist{display:flex;flex-direction:column;gap:6px}
+.strow{display:flex;align-items:center;gap:12px;width:100%;padding:10px;border:1px solid var(--line);border-radius:12px;background:var(--surface);color:var(--ink);text-align:left;font:inherit;cursor:pointer}
+.strow>span:not(.stb){display:flex;flex-direction:column;min-width:0}
+.strow small{color:var(--muted);font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.stlink{display:inline-flex;align-items:center;gap:8px;padding:0;border:0;background:none;color:inherit;font:inherit;text-align:left;cursor:pointer}
+.stlink>span:not(.stb){display:flex;flex-direction:column}
+.stlink small{font-size:12.5px}
 
 
 </style>

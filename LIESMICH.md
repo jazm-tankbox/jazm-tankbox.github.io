@@ -1,6 +1,19 @@
-# MyTankBox – Test-App 0.4.0.1
+# MyTankBox – Test-App 0.5.0.1
 
 Tankungen des Dienstwagens mit Quittungsfoto erfassen, Verbrauch und Kosten auswerten. Alle Daten bleiben auf dem Handy. Es gibt keinen Server. Einzige mögliche Verbindungen: die optionale automatische Sicherung in dein eigenes privates GitHub-Repo, das App-Update in das App-Repo und das einmalige Laden der Texterkennung (nur Programmdateien, keine Daten von dir).
+
+## Neu in 0.5 – Abzeichen und Bilder für Tankstellen
+
+- Jede Tankstelle bekommt ein rundes Abzeichen mit dem Anfangsbuchstaben in einer Farbe deiner Wahl (10 Farben). Zu sehen in der Liste, in der Detailansicht und unter Daten → Tankstellen.
+- Optional ein eigenes Bild pro Tankstelle, z. B. ein Foto vom Schild: wird rund zugeschnitten und ersetzt das Abzeichen. Bilder sind Teil der GitHub-Sicherung und der Sicherungsdatei.
+- Bearbeiten: in der Detailansicht einer Tankung auf die Tankstelle tippen, oder unter Daten → Tankstellen. Dort lassen sich auch Name und Adresse ändern (Tankungen mit dem alten Namen werden mit umbenannt) oder eine Tankstelle vergessen.
+- Markenlogos sind bewusst nicht enthalten (geschützte Markenzeichen).
+
+## Neu in 0.4.1 – Tankstelle anhand der Adresse
+
+- Die Adresse der Tankstelle wird von der Quittung gelesen und am Eintrag gespeichert (neues Feld „Adresse der Tankstelle“, auch in Detail und CSV).
+- Die Marke wird auch unscharf erkannt, wenn das Logo nicht lesbar ist: in den Kopfzeilen, bei „… Station“ und im Kleingedruckten („ESSO Deutschland GmbH“). Tankkarten wie Euroshell zählen nicht als Marke.
+- Die App merkt sich Name und Adresse, die du speicherst. Beim nächsten Beleg derselben Tankstelle (gleiche PLZ, ähnliche Straße – kleine Lesefehler und falsch gelesene Hausnummern sind egal) werden beide automatisch eingetragen. Die gemerkten Tankstellen sind Teil der Sicherung.
 
 ## Neu in 0.4 – Quittung automatisch auslesen
 

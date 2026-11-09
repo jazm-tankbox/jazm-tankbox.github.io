@@ -1,6 +1,6 @@
 (function(){
 'use strict';
-const APP_VERSION='0.4.0.1';
+const APP_VERSION='0.5.0.1';
 /* Eigener Speicher je Adresse: die Live-App unter / behält ihre Namen, eine Test-App unter /test/ bekommt eigene */
 const BASE=location.pathname.replace(/[^/]*$/,'');
 const NS=BASE==='/'?'':BASE.replace(/^\/|\/$/g,'').replace(/[^a-z0-9]+/gi,'-').toLowerCase()+'-';
@@ -53,7 +53,7 @@ const fotoGet=id=>st('fotos','readonly',s=>s.get(id)),fotoPut=(id,b)=>st('fotos'
   fotoDel=id=>st('fotos','readwrite',s=>s.delete(id)),fotoKeys=()=>st('fotos','readonly',s=>s.getAllKeys()),fotoClear=()=>st('fotos','readwrite',s=>s.clear());
 
 let db=null;
-const empty=()=>({v:1,did:uid(),fills:[],services:[],meta:{}});
+const empty=()=>({v:1,did:uid(),fills:[],services:[],stationen:[],meta:{}});
 const dbOk=o=>!!(o&&Array.isArray(o.fills));
 async function load(){
   let a=null,b=null;
@@ -61,7 +61,7 @@ async function load(){
   try{const m=await kvGet('daten');b=m?JSON.parse(m):null}catch(e){}
   const ta=dbOk(a)?a.saved||0:-1,tb=dbOk(b)?b.saved||0:-1;
   db=ta<0&&tb<0?empty():tb>ta?b:a;
-  if(!db.did)db.did=uid();db.meta=db.meta||{};if(!Array.isArray(db.services))db.services=[];
+  if(!db.did)db.did=uid();db.meta=db.meta||{};if(!Array.isArray(db.services))db.services=[];if(!Array.isArray(db.stationen))db.stationen=[];
   if(tb>ta&&ta>=0)setTimeout(()=>toast('Die Daten wurden aus der Zweitkopie wiederhergestellt.'),800);
 }
 let saving=Promise.resolve();
@@ -161,7 +161,7 @@ function ghStatusText(){
   return 'Noch nicht gesichert.';
 }
 /* Was gesichert wird: die Daten ohne Zähler und Zeitstempel, damit unveränderte Stände nicht neu hochgeladen werden */
-const payload=()=>JSON.stringify({app:'tankbox',format:1,version:APP_VERSION,did:db.did,fills:byDate(),services:svcByDate()},null,1);
+const payload=()=>JSON.stringify({app:'tankbox',format:1,version:APP_VERSION,did:db.did,fills:byDate(),services:svcByDate(),stationen:db.stationen},null,1);
 async function ghRemote(g){
   const cur=await ghFetch(g,'GET','/contents/daten.json');if(!cur)return {cur:null,json:null};
   let json=null;
@@ -175,7 +175,7 @@ async function ghSync(force){
   ghBusy=true;clearTimeout(ghTimer);ghTimer=0;setGhStat({});
   try{
     // 1) Fotos, die im Repo noch fehlen (Fotos ändern sich nie, daher reicht der Name)
-    const ids=allEntries().map(f=>f.foto).filter(Boolean);
+    const ids=allEntries().map(f=>f.foto).concat(db.stationen.map(x=>x.bild)).filter(Boolean);
     if(ids.length){
       const list=await ghFetch(g,'GET','/contents/fotos');const have=new Set((list||[]).map(x=>String(x.name).replace(/\.jpg$/,'')));
       for(const id of ids){if(have.has(id))continue;const b=await fotoGet(id).catch(()=>null);if(!b)continue;
@@ -209,17 +209,17 @@ document.addEventListener('visibilitychange',()=>{if(document.hidden&&ghTimer)gh
 async function ghRestore(g,onStep){
   const {json}=await ghRemote(g);let o=null;try{o=JSON.parse(json)}catch(e){}
   if(!o||o.app!=='tankbox'||!Array.isArray(o.fills))throw new Error('Im Repo wurde keine MyTankBox-Sicherung gefunden.');
-  const need=o.fills.concat(o.services||[]).map(f=>f.foto).filter(Boolean);let n=0;
+  const need=o.fills.concat(o.services||[]).map(f=>f.foto).concat((o.stationen||[]).map(x=>x.bild)).filter(Boolean);let n=0;
   for(const id of need){onStep&&onStep(++n,need.length);if(await fotoGet(id).catch(()=>null))continue;
     const b=await ghFetch(g,'GET','/contents/fotos/'+encodeURIComponent(id)+'.jpg',null,true).catch(()=>null);
     if(b)await fotoPut(id,new Blob([b],{type:'image/jpeg'}))}
-  db={v:1,did:o.did||uid(),fills:o.fills,services:Array.isArray(o.services)?o.services:[],meta:Object.assign({},db.meta,{dirty:0,lastBackup:iso(new Date())})};
+  db={v:1,did:o.did||uid(),fills:o.fills,services:Array.isArray(o.services)?o.services:[],stationen:Array.isArray(o.stationen)?o.stationen:[],meta:Object.assign({},db.meta,{dirty:0,lastBackup:iso(new Date())})};
   await save(false);
 }
 
 /* ---------- Sicherungsdatei (zusätzlich oder statt GitHub) ---------- */
 async function exportBackup(){
-  const fotos={};for(const f of allEntries()){if(!f.foto)continue;const b=await fotoGet(f.foto).catch(()=>null);if(b)fotos[f.foto]=toB64(await b.arrayBuffer())}
+  const fotos={};for(const id of allEntries().map(f=>f.foto).concat(db.stationen.map(x=>x.bild)).filter(Boolean)){const b=await fotoGet(id).catch(()=>null);if(b)fotos[id]=toB64(await b.arrayBuffer())}
   const o=JSON.parse(payload());o.exported=new Date().toISOString();o.fotos=fotos;
   const ok=await deliverFile('tankbox-sicherung-'+iso(new Date())+'.tankbox',JSON.stringify(o),'application/json');
   if(ok){db.meta.dirty=0;db.meta.lastBackup=iso(new Date());await save(false,false);bkDot();toast('Sicherung erstellt.')}
@@ -230,7 +230,7 @@ async function readBackupFile(file){
   return o}
 async function restoreBackup(o){
   for(const [id,b64] of Object.entries(o.fotos||{}))await fotoPut(id,new Blob([fromB64(b64)],{type:'image/jpeg'}));
-  db={v:1,did:o.did||uid(),fills:o.fills,services:Array.isArray(o.services)?o.services:[],meta:Object.assign({},db.meta,{dirty:0,lastBackup:iso(new Date())})};
+  db={v:1,did:o.did||uid(),fills:o.fills,services:Array.isArray(o.services)?o.services:[],stationen:Array.isArray(o.stationen)?o.stationen:[],meta:Object.assign({},db.meta,{dirty:0,lastBackup:iso(new Date())})};
   await save(false);closeSheet(false);render();celebrate('Wiederhergestellt');toast(o.fills.length+' Tankungen'+(db.services.length?' und '+db.services.length+' Service-Einträge':'')+' geladen.')}
 async function deliverFile(name,text,type){
   const blob=new Blob([text],{type});
@@ -240,9 +240,9 @@ async function deliverFile(name,text,type){
   setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},2000);return true}
 function exportCsv(){
   const c=calc(),q=v=>'"'+String(v??'').replace(/"/g,'""')+'"',n=(v,d)=>v==null||v===''||isNaN(v)?'':Number(v).toFixed(d).replace('.',',');
-  const rows=[['Typ','Datum','Uhrzeit','Kilometerstand','Liter / Menge','Preis pro Liter','Betrag','Autowäsche','Kraftstoff / Art','Ort','Volltank','Gefahrene km','Verbrauch l/100km','Nächste fällig','Notiz'].map(q).join(';')];
-  const all=byKm().map(f=>({k:f.datum+(f.zeit||''),r:()=>{const x=c[f.id]||{};return [q('Tankung'),q(fmtS(f.datum)),q(f.zeit||''),n(f.km,0),n(f.liter,2),n(f.ppl,3),n(f.betrag,2),n(f.waesche,2),q(f.sorte||''),q(f.station||''),q(f.voll===false?'nein':'ja'),n(x.dist,0),n(x.verb,2),'',q(f.notiz||'')]}}))
-    .concat(db.services.map(v=>({k:v.datum+'~',r:()=>[q(svcName(v)),q(fmtS(v.datum)),'',n(v.km,0),n(v.menge,1),'',n(v.betrag,2),'',q(svcDetail(v)),q(v.ort||''),'','','',q(nextText(v)),q(v.notiz||'')]})));
+  const rows=[['Typ','Datum','Uhrzeit','Kilometerstand','Liter / Menge','Preis pro Liter','Betrag','Autowäsche','Kraftstoff / Art','Ort','Adresse','Volltank','Gefahrene km','Verbrauch l/100km','Nächste fällig','Notiz'].map(q).join(';')];
+  const all=byKm().map(f=>({k:f.datum+(f.zeit||''),r:()=>{const x=c[f.id]||{};return [q('Tankung'),q(fmtS(f.datum)),q(f.zeit||''),n(f.km,0),n(f.liter,2),n(f.ppl,3),n(f.betrag,2),n(f.waesche,2),q(f.sorte||''),q(f.station||''),q(f.adresse||''),q(f.voll===false?'nein':'ja'),n(x.dist,0),n(x.verb,2),'',q(f.notiz||'')]}}))
+    .concat(db.services.map(v=>({k:v.datum+'~',r:()=>[q(svcName(v)),q(fmtS(v.datum)),'',n(v.km,0),n(v.menge,1),'',n(v.betrag,2),'',q(svcDetail(v)),q(v.ort||''),'','','','',q(nextText(v)),q(v.notiz||'')]})));
   all.sort((a,b)=>a.k.localeCompare(b.k)).forEach(x=>rows.push(x.r().join(';')));
   return deliverFile('tankbox-'+iso(new Date())+'.csv','﻿'+rows.join('\r\n'),'text/csv')}
 
@@ -325,7 +325,8 @@ function bkDot(){const b=document.getElementById('menuBtn');if(!b||!db)return;co
   b.title='Daten & Sicherung'+({ok:' · Gesichert',warn:' · Sicherung fällig',crit:' · Problem mit der Sicherung'}[s]||'')}
 function fillRow(f,c,i){const x=c[f.id]||{};const d=parse(f.datum);
   return `<button type="button" class="row" data-fill="${f.id}" style="--j:${i||0}"><span class="date"><b>${d.getDate()}</b><span>${MON[d.getMonth()].slice(0,3)}</span></span>
-    <span class="main"><span class="t">${nf(f.liter,2)} l${f.sorte?' · '+esc(f.sorte):''}</span><span class="s">${km(f.km)}${f.station?' · '+esc(f.station):''}${f.voll===false?' · teilweise':''}</span>
+    <span class="main"><span class="t">${nf(f.liter,2)} l${f.sorte?' · '+esc(f.sorte):''}</span><span class="s">${km(f.km)}${f.voll===false?' · teilweise':''}</span>
+    ${f.station?`<span class="s stline">${badge(stOf(f),f.station,'sm')}${esc(f.station)}</span>`:''}
     ${f.waesche?`<span class="s">inkl. Autowäsche ${eur(f.waesche)}</span>`:''}
     ${x.verb!=null?`<span class="s">${nf(x.verb,1)} l/100 km auf ${km(x.seit)}</span>`:''}</span>
     <span class="ramt"><span class="amt num">${eur(fillCost(f))}</span>${f.ppl?`<small class="muted num">${nf(f.ppl,3)} €/l</small>`:''}${f.foto?`<small class="muted" aria-label="mit Foto">${svg('cam','mini-ic')}</small>`:''}</span></button>`}
@@ -406,11 +407,12 @@ async function openDetail(id){
       ${f.waesche?`<dt>Autowäsche</dt><dd class="num">${eur(f.waesche)}</dd><dt>Quittung gesamt</dt><dd class="num"><b>${eur(fillCost(f))}</b></dd>`:''}
       <dt>Preis pro Liter</dt><dd class="num">${f.ppl?nf(f.ppl,3)+' €':'–'}</dd>
       <dt>Kraftstoff</dt><dd>${esc(f.sorte||'–')}</dd>
-      <dt>Tankstelle</dt><dd>${esc(f.station||'–')}</dd>
+      <dt>Tankstelle</dt><dd>${f.station?`<button type="button" class="stlink" id="dSt">${badge(stOf(f),f.station,'sm')}<span>${esc(f.station)}${f.adresse?`<small class="muted">${esc(f.adresse)}</small>`:''}</span></button>`:'–'}</dd>
       ${f.notiz?`<dt>Notiz</dt><dd>${esc(f.notiz)}</dd>`:''}
     </dl>
     <div class="actions two"><button type="button" class="btn primary" id="dEdit">Bearbeiten</button><button type="button" class="btn danger" id="dDel">Löschen</button></div>`,
   s=>{s.querySelector('#dEdit').onclick=()=>openForm(f.id);
+    const dst=s.querySelector('#dSt');if(dst)dst.onclick=()=>openStation(stationFor(f),()=>openDetail(f.id));
     s.querySelector('#dDel').onclick=async()=>{if(!confirm('Diese Tankung löschen? Das Foto wird auf diesem Handy ebenfalls entfernt.'))return;
       db.fills=db.fills.filter(y=>y.id!==f.id);if(f.foto)fotoDel(f.foto).catch(()=>{});await save();closeSheet();render();toast('Tankung gelöscht.')};
     const img=s.querySelector('.photo');if(img)img.onclick=()=>window.open(url,'_blank')});
@@ -579,6 +581,86 @@ function openSvcForm(id,typ){
   });
 }
 
+/* ---------- Tankstellen merken: Adresse → Name ----------
+   Gleiche Postleitzahl + ähnlicher Straßenname (Lesefehler und Hausnummer egal) = dieselbe Tankstelle */
+function addrParts(a){const m=String(a||'').match(/^(.*?),?\s*(\d{5})\b/);return m?{strasse:m[1].trim(),plz:m[2]}:null}
+function findStation(plz,strasse){if(!plz||!window.TankOCR)return null;const k=TankOCR.streetKey(strasse);
+  let best=null,bd=9;for(const st of db.stationen){if(st.plz!==plz)continue;const d=k&&st.key?TankOCR.lev(k,st.key):(k||st.key?9:0);if(d<bd){bd=d;best=st}}
+  return best&&bd<=2?best:null}
+function rememberStation(name,adresse){if(!name)return;const a=addrParts(adresse);
+  if(!a||!window.TankOCR){if(!db.stationen.some(x=>x.name===name))db.stationen.push({name});return}
+  const k=TankOCR.streetKey(a.strasse),hit=findStation(a.plz,a.strasse);
+  if(hit){hit.name=name;hit.adresse=adresse;hit.key=k}else{const byName=db.stationen.find(x=>x.name===name&&!x.plz);
+    if(byName)Object.assign(byName,{plz:a.plz,key:k,adresse});else db.stationen.push({plz:a.plz,key:k,name,adresse})}}
+
+/* ---------- Abzeichen & Bilder je Tankstelle ---------- */
+const ST_COLORS=['#64748B','#B4530F','#2563EB','#0E7490','#15803D','#A16207','#B91C1C','#7C3AED','#BE185D','#334155'];
+const hashC=s=>{let h=0;for(const ch of String(s))h=(h*31+ch.charCodeAt(0))>>>0;return ST_COLORS[h%ST_COLORS.length]};
+const stImg=new Map();
+async function loadStImgs(){
+  const want=new Set(db.stationen.map(s=>s.bild).filter(Boolean));
+  for(const [id,u] of stImg)if(!want.has(id)){URL.revokeObjectURL(u);stImg.delete(id)}
+  let added=false;for(const id of want){if(stImg.has(id))continue;const b=await fotoGet(id).catch(()=>null);if(b){stImg.set(id,URL.createObjectURL(b));added=true}}
+  return added}
+const stOf=f=>{if(!f||!f.station)return null;const a=addrParts(f.adresse);
+  return (a&&findStation(a.plz,a.strasse))||db.stationen.find(s=>s.name===f.station)||null};
+function badge(st,name,cls=''){const n=(st&&st.name)||name||'';if(!n)return '';
+  const img=st&&st.bild&&stImg.get(st.bild);
+  if(img)return `<img class="stb ${cls}" src="${img}" alt="">`;
+  const ch=(n.match(/[A-Za-zÄÖÜäöü0-9]/)||['?'])[0].toUpperCase();
+  return `<span class="stb ${cls}" style="--stc:${(st&&st.farbe)||hashC(n)}" aria-hidden="true">${esc(ch)}</span>`}
+async function cropRound(file){const bmp=await createImageBitmap(file);const s=Math.min(bmp.width,bmp.height),c=document.createElement('canvas');c.width=c.height=256;
+  c.getContext('2d').drawImage(bmp,(bmp.width-s)/2,(bmp.height-s)/2,s,s,0,0,256,256);return new Promise(r=>c.toBlob(b=>r(b),'image/jpeg',.85))}
+function openStation(st,back){
+  if(!st)return;let newImg=null,imgGone=false,prev=null;
+  openSheet(head('Tankstelle')+`
+    <form id="stf" novalidate>
+      <div class="stprev" id="stprev"></div>
+      <label class="field"><span>Name</span><input name="name" maxlength="80" required value="${esc(st.name||'')}"></label>
+      <label class="field"><span>Adresse</span><input name="adresse" maxlength="120" value="${esc(st.adresse||'')}" placeholder="optional"></label>
+      <div class="field"><span>Farbe des Abzeichens</span><div class="stcols" role="radiogroup">${ST_COLORS.map(c=>`<label class="stcol" style="--stc:${c}"><input type="radio" name="farbe" value="${c}"${(st.farbe||hashC(st.name))===c?' checked':''}><span></span></label>`).join('')}</div></div>
+      <div class="field"><span>Eigenes Bild (optional)</span>
+        <p class="hint" style="margin:0 0 8px">Zum Beispiel ein Foto vom Schild an der Tankstelle. Es wird rund zugeschnitten und ersetzt das Abzeichen.</p>
+        <div class="actions"><label class="btn">${svg('cam','bi')} Foto aufnehmen<input id="stcam" type="file" accept="image/*" capture="environment" hidden></label>
+          <label class="btn">Aus Galerie<input id="stgal" type="file" accept="image/*" hidden></label>
+          <button type="button" class="btn" id="strm"${st.bild?'':' hidden'}>Bild entfernen</button></div></div>
+      <div class="actions two"><button type="button" class="btn danger" id="stdel">Vergessen</button><button class="btn primary" id="stsave">Speichern</button></div>
+    </form>`,
+  s=>{const fm=s.querySelector('#stf'),pv=s.querySelector('#stprev'),rm=s.querySelector('#strm');
+    const draw=()=>{const tmp={name:fm.elements.name.value.trim()||st.name,farbe:fm.elements.farbe.value,bild:null};
+      if(prev)pv.innerHTML=`<img class="stb big" src="${prev}" alt="">`;
+      else if(st.bild&&!imgGone&&stImg.get(st.bild))pv.innerHTML=`<img class="stb big" src="${stImg.get(st.bild)}" alt="">`;
+      else pv.innerHTML=badge(tmp,tmp.name,'big');
+      rm.hidden=!(prev||(st.bild&&!imgGone))};
+    draw();fm.addEventListener('input',draw);fm.addEventListener('change',draw);
+    const pick=async inp=>{const f=inp.files[0];inp.value='';if(!f)return;const b=await cropRound(f).catch(()=>null);if(!b){toast('Dieses Bild lässt sich nicht lesen.');return}
+      newImg=b;imgGone=false;if(prev)URL.revokeObjectURL(prev);prev=URL.createObjectURL(b);draw();buzz(6)};
+    s.querySelector('#stcam').addEventListener('change',e=>pick(e.target));s.querySelector('#stgal').addEventListener('change',e=>pick(e.target));
+    rm.onclick=()=>{newImg=null;imgGone=true;if(prev)URL.revokeObjectURL(prev);prev=null;draw()};
+    s.querySelector('#stdel').onclick=async()=>{if(!confirm('Diese Tankstelle vergessen? Deine Tankungen bleiben unverändert, nur Abzeichen, Bild und das automatische Erkennen fallen weg.'))return;
+      db.stationen=db.stationen.filter(x=>x!==st);if(st.bild)fotoDel(st.bild).catch(()=>{});await save();await loadStImgs();closeSheet();render();toast('Tankstelle vergessen.')};
+    fm.onsubmit=async e=>{e.preventDefault();const el=fm.elements,name=el.name.value.trim();if(!name){el.name.closest('.field').classList.add('no');return}
+      const oldName=st.name,ad=el.adresse.value.trim(),a=addrParts(ad);
+      st.name=name;st.farbe=el.farbe.value;st.adresse=ad||undefined;if(a){st.plz=a.plz;st.key=window.TankOCR?TankOCR.streetKey(a.strasse):''}
+      if(newImg){const id=uid();await fotoPut(id,newImg);if(st.bild)fotoDel(st.bild).catch(()=>{});st.bild=id}
+      else if(imgGone&&st.bild){fotoDel(st.bild).catch(()=>{});delete st.bild}
+      // Umbenennen: Einträge mit altem Namen mitziehen
+      let n=0;if(oldName&&oldName!==name)db.fills.forEach(f=>{if(f.station===oldName){f.station=name;n++}});
+      await save();await loadStImgs();DS.savedTick(s.querySelector('#stsave'));
+      setTimeout(()=>{closeSheet();render();toast(n?`Gespeichert · ${n} Tankung${n===1?'':'en'} umbenannt`:'Gespeichert.');if(back)setTimeout(back,motion()?350:0)},motion()?450:0)};
+  });
+}
+/* Tankstelle zu einer Tankung finden oder anlegen */
+function stationFor(f){let st=stOf(f);if(st)return st;if(!f.station)return null;
+  const a=addrParts(f.adresse);st={name:f.station};if(f.adresse)st.adresse=f.adresse;if(a){st.plz=a.plz;st.key=window.TankOCR?TankOCR.streetKey(a.strasse):''}
+  db.stationen.push(st);return st}
+function stationsHtml(){
+  const used=new Map();db.fills.forEach(f=>{const st=stOf(f);if(st)used.set(st,(used.get(st)||0)+1)});
+  const list=db.stationen.slice().sort((a,b)=>(used.get(b)||0)-(used.get(a)||0)||a.name.localeCompare(b.name));
+  if(!list.length)return '<p class="ds-hint">Noch keine Tankstellen gemerkt. Sie entstehen automatisch, wenn du eine Tankung mit Tankstelle speicherst.</p>';
+  return `<div class="stlist">${list.map(st=>`<button type="button" class="strow" data-st="${db.stationen.indexOf(st)}">${badge(st)}<span><b>${esc(st.name)}</b><small>${esc(st.adresse||'ohne Adresse')} · ${used.get(st)||0}×</small></span></button>`).join('')}</div>`}
+
+
 /* ---------- Formular ---------- */
 async function shrink(file){
   const bmp=await createImageBitmap(file).catch(()=>null);
@@ -613,6 +695,7 @@ function openForm(id,withPhoto){
       <div class="grid2"><label class="field"><span>Preis pro Liter (€)</span><input name="ppl" inputmode="decimal" placeholder="wird berechnet" value="${v('ppl',3)}"></label>
         <label class="field"><span>Kraftstoff</span><select name="sorte">${SORTEN.map(x=>`<option${x===f.sorte?' selected':''}>${x}</option>`).join('')}</select></label></div>
       <label class="field"><span>Tankstelle / Ort</span><input name="station" maxlength="80" value="${esc(f.station||'')}" placeholder="z. B. Aral Kamen" list="stlist"></label>
+      <label class="field"><span>Adresse der Tankstelle</span><input name="adresse" maxlength="120" value="${esc(f.adresse||'')}" placeholder="wird von der Quittung gelesen"></label>
       <datalist id="stlist">${[...new Set(byDate().map(x=>x.station).filter(Boolean))].slice(0,12).map(x=>`<option value="${esc(x)}">`).join('')}</datalist>
       <label class="check"><input name="voll" type="checkbox"${f.voll===false?'':' checked'}> Vollgetankt <span class="muted">(nur bei Ausnahmen abwählen)</span></label>
       <label class="field"><span>Notiz (optional)</span><input name="notiz" maxlength="200" value="${esc(f.notiz||'')}"></label>
@@ -652,7 +735,9 @@ function openForm(id,withPhoto){
       if(put('betrag',r.betrag&&fx(r.betrag,2)))got.push(eur(r.betrag));
       if(put('waesche',r.waesche&&fx(r.waesche,2)))got.push('Wäsche '+eur(r.waesche));
       if(r.sorte&&SORTEN.includes(r.sorte))put('sorte',r.sorte);
-      put('station',r.station);
+      const known=findStation(r.plz,r.strasse);
+      if(known){put('station',known.name);put('adresse',known.adresse);if(known.name)got.push(known.name+' (bekannt)')}
+      else{put('station',r.station);put('adresse',r.adresse);if(r.station)got.push(r.station)}
       live();buzz(got.length?[8,40,8]:[20,40,20]);
       const miss=[!r.km&&'Kilometerstand',!r.liter&&'Liter',!r.betrag&&'Betrag'].filter(Boolean);
       focr.className='hint '+(miss.length||!r.ok?'ocrwarn':'ocrok');
@@ -662,7 +747,7 @@ function openForm(id,withPhoto){
     s.querySelector('#fcam').addEventListener('change',e=>pick(e.target));s.querySelector('#fgal').addEventListener('change',e=>pick(e.target));
     rm.onclick=()=>{newFoto=null;fotoGone=true;showFoto()};
     const read=()=>{const e=fm.elements;const o={datum:e.datum.value,zeit:e.zeit.value,km:Math.round(num(e.km.value)),liter:num(e.liter.value),betrag:num(e.betrag.value),
-      ppl:num(e.ppl.value),waesche:num(e.waesche.value),sorte:e.sorte.value,station:e.station.value.trim(),voll:e.voll.checked,notiz:e.notiz.value.trim()};
+      ppl:num(e.ppl.value),waesche:num(e.waesche.value),sorte:e.sorte.value,station:e.station.value.trim(),adresse:e.adresse.value.trim(),voll:e.voll.checked,notiz:e.notiz.value.trim()};
       if(!(o.ppl>0)&&o.liter>0&&o.betrag>0)o.ppl=Math.round(o.betrag/o.liter*1000)/1000;return o};
     const live=()=>{const o=read();const so=fm.querySelector('#fsum');if(so)so.textContent=o.betrag>0||o.waesche>0?eur((o.betrag||0)+(o.waesche||0)):'–';const ph=fm.elements.ppl;if(!ph.value)ph.placeholder=o.liter>0&&o.betrag>0?nf(o.betrag/o.liter,3)+' (berechnet)':'wird berechnet';
       const w=checks(o,old&&old.id);warn.hidden=!w.length;warn.innerHTML=w.map(esc).join('<br>')};
@@ -679,6 +764,8 @@ function openForm(id,withPhoto){
       else if(fotoGone&&rec.foto){fotoDel(rec.foto).catch(()=>{});rec.foto=null}
       if(!rec.ppl||Number.isNaN(rec.ppl))delete rec.ppl;
       if(!(rec.waesche>0))delete rec.waesche;
+      if(!rec.adresse)delete rec.adresse;
+      rememberStation(rec.station,rec.adresse);
       const first=!db.fills.length;if(!old)db.fills.push(rec);
       await save();DS.savedTick(s.querySelector('#fsave'));
       setTimeout(()=>{closeSheet();render();if(first)celebrate('Erste Tankung!');else{const x=calc()[rec.id];toast(x&&x.verb!=null?`Gespeichert · ${nf(x.verb,1)} l/100 km`:'Gespeichert.')}},motion()?500:0)};
@@ -759,7 +846,7 @@ async function updWatch(g,sha){
 /* ---------- Blatt „Daten & Sicherung“ – gleicher Aufbau wie in den anderen Boxen ---------- */
 let menuAcc=null;
 const MI={sun:'<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',down:'<path d="M12 3v12M7 10l5 5 5-5"/><path d="M5 19h14"/>',
-  pkg:'<path d="M21 8l-9-5-9 5 9 5z"/><path d="M3 8v8l9 5 9-5V8M12 13v8"/>',list:'<path d="M4 6h16M4 12h16M4 18h10"/>',sheet:'<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M4 9h16M4 15h16M10 3v18"/>'};
+  pump:'<path d="M4 20V6a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v14"/><path d="M3 20h12M7 8h4"/><path d="M14 9h2l2 2v6a1.5 1.5 0 0 0 3 0V8l-3-3"/>',pkg:'<path d="M21 8l-9-5-9 5 9 5z"/><path d="M3 8v8l9 5 9-5V8M12 13v8"/>',list:'<path d="M4 6h16M4 12h16M4 18h10"/>',sheet:'<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M4 9h16M4 15h16M10 3v18"/>'};
 const mIco=k=>`<span class="ai"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${MI[k]}</svg></span>`;
 const mChev=()=>`<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>`;
 const mAcc=(k,ic,t,sub,body,force)=>`<details class="acc" data-acc="${k}"${menuAcc===k||force?' open':''}><summary>${mIco(ic)}<span class="at"><b>${t}</b><small>${sub}</small></span>${mChev()}</summary><div class="accb">${body}</div></details>`;
@@ -790,6 +877,7 @@ function openMenu(open){
     :`<p class="ds-hint">Neue Versionen als Zip direkt aus der App veröffentlichen. Dafür brauchst du einen eigenen Zugangsschlüssel nur für das App-Repo.</p>
     <div class="ds-acts"><button type="button" class="ds-btn pri" id="up_chg">GitHub verbinden</button></div>`}
     <div id="updStatus" class="ds-box"${UPD?'':' hidden'}>${UPD}</div>`,!!UPD)
+  +mAcc('stat','pump','Tankstellen',db.stationen.length+' gemerkt · Abzeichen & Bilder',`<p class="ds-hint">Tippe eine Tankstelle an, um Name, Farbe oder ein eigenes Bild (z. B. Foto vom Schild) festzulegen.</p>${stationsHtml()}`)
   +mAcc('look','sun','Darstellung',({auto:'Automatisch',light:'Hell',dark:'Dunkel'})[DS.getTheme()]+' · hell oder dunkel',`<div class="ds-lbl">Hell oder dunkel</div>${DS.themeHtml()}`)
   +mAcc('eintr','list','Einträge',db.fills.length+' Tankung'+(db.fills.length===1?'':'en')+(db.services.length?' · '+db.services.length+' Service':''),`
     <p class="ds-hint">Löscht alle Tankungen und Fotos auf diesem Handy. In GitHub bleibt alles liegen. Das lässt sich nicht rückgängig machen.</p>
@@ -825,6 +913,7 @@ function openMenu(open){
     const ghX=s.querySelector('#ghOff');if(ghX)ghX.onclick=()=>{if(!confirm('GitHub-Sicherung trennen? Im Repo bleibt alles liegen.'))return;
       setKeys({gh:null});setGhStat({err:'',at:0,conflict:false});openMenu('gh');toast('GitHub-Sicherung getrennt.')};
     bindUpd(s);
+    s.querySelectorAll('[data-st]').forEach(b=>b.onclick=()=>openStation(db.stationen[+b.dataset.st],()=>openMenu('stat')));
     s.querySelector('#bkGo').onclick=async()=>{await exportBackup();if(root.firstElementChild)openMenu('gh')};
     const bi=s.querySelector('#bkIn');
     bi.addEventListener('change',async()=>{const file=bi.files[0];bi.value='';if(!file)return;
@@ -976,7 +1065,7 @@ document.getElementById('menuBtn').onclick=()=>openMenu();
 document.getElementById('menuBtn').addEventListener('click',()=>setFan(false));
 if(IS_TEST){document.title='MyTankBox TEST';const h=document.querySelector('.brand h1');if(h)h.insertAdjacentHTML('beforeend',' <span class="testtag">TEST</span>')}
 (async()=>{
-  await load();await loadKeys();render();askPersist();
+  await load();await loadKeys();render();loadStImgs().then(a=>{if(a)render()});askPersist();
   if(new URLSearchParams(location.search).get('aktion')==='neu'){history.replaceState(null,'',location.pathname);openForm(null,true)}
   if(ghCfg()&&(db.meta.dirty||0)>0)ghQueue(1500);
 })();

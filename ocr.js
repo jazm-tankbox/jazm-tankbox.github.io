@@ -9,15 +9,35 @@ const OPTS={workerPath:'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.0/dist/wor
   corePath:'https://cdn.jsdelivr.net/npm/tesseract.js-core@5.1.0'};
 const LANGS=['https://cdn.jsdelivr.net/npm/@tesseract.js-data/deu@1.0.0/4.0.0_best_int','https://tessdata.projectnaptha.com/4.0.0'];
 
+
+/* ---------- Marke unscharf erkennen ---------- */
+const BRANDLIST=[['Aral','ARAL'],['Shell','SHELL'],['Esso','ESSO'],['JET','JET'],['TotalEnergies','TOTAL'],['Avia','AVIA'],['Star','STAR'],['Agip','AGIP'],
+  ['Eni','ENI'],['Westfalen','WESTFALEN'],['HEM','HEM'],['Q1','Q1'],['Raiffeisen','RAIFFEISEN'],['OMV','OMV'],['bft','BFT'],['Tamoil','TAMOIL'],['Orlen','ORLEN'],
+  ['Hoyer','HOYER'],['Classic','CLASSIC'],['Globus','GLOBUS'],['Supermarkt-Tankstelle','SUPERMARKT']];
+function lev(a,b){const m=a.length,n=b.length;if(Math.abs(m-n)>2)return 9;let p=Array.from({length:n+1},(_,j)=>j);
+  for(let i=1;i<=m;i++){const c=[i];for(let j=1;j<=n;j++)c[j]=Math.min(p[j]+1,c[j-1]+1,p[j-1]+(a[i-1]===b[j-1]?0:1));p=c}return p[n]}
+const deDigit=t=>t.toUpperCase().replace(/5/g,'S').replace(/0/g,'O').replace(/1/g,'I').replace(/3/g,'E').replace(/8/g,'B').replace(/4/g,'A').replace(/[^A-ZÄÖÜ]/g,'');
+function matchBrand(tok){const t=deDigit(tok);if(t.length<2)return '';
+  for(const [n,k] of BRANDLIST){if(t===k)return n}
+  for(const [n,k] of BRANDLIST){if(k.length>=4&&t.length>=3&&lev(t,k)<=1)return n}
+  // Anfangsbuchstabe falsch gelesen (E→I wie „1550“ für ESSO)
+  for(const [n,k] of BRANDLIST){if(k.length>=4&&t.length===k.length&&t.slice(1)===k.slice(1))return n}
+  return ''}
+function findBrand(lines){
+  const clean=l=>l.replace(/euro\s?shell|shell\s?(card|flot)|dkv|uta\b|routex|aral\s?card/ig,' ');
+  // 1) Kopfzeilen, 2) „X Station“, 3) „X Deutschland GmbH“ im Kleingedruckten
+  for(const l of lines.slice(0,8).map(clean)){for(const tok of l.split(/[\s,.:;()/]+/)){const b=matchBrand(tok);if(b&&tok.length<=12)return b}}
+  for(const l of lines.map(clean)){const m=l.match(/([A-Za-z0-9]{2,12})\s+(?:station|tankstelle)\b/i);if(m){const b=matchBrand(m[1]);if(b)return b}}
+  for(const l of lines.map(clean)){const m=l.match(/([A-Za-z0-9]{2,12})\s+(?:deutschland|germany)\s+g\w{2,3}h/i);if(m){const b=matchBrand(m[1]);if(b)return b}}
+  return ''}
+const streetKey=s=>String(s||'').toLowerCase().replace(/stra(ss|ß)e|str\.?/g,'str').replace(/\d.*$/,'').replace(/[^a-zäöüß]/g,'');
+
 /* ---------- Werte aus dem Text ziehen ---------- */
 const N=s=>{const m=String(s).replace(/\s/g,'').replace(/[Oo]/g,'0').match(/(\d{1,5})[,.](\d{1,3})/);return m?parseFloat(m[1]+'.'+m[2]):NaN};
 // Beträge: Zahl mit genau 2 Nachkommastellen, nicht Teil von Datum/Uhrzeit
 const AMT=/(?<![\d.,:])(\d{1,4})\s?[,.]\s?(\d{2})(?![\d.,:])/g;
 const amts=l=>[...l.matchAll(AMT)].map(m=>parseFloat(m[1]+'.'+m[2]));
 const lastAmt=l=>{const a=amts(l);return a.length?a[a.length-1]:NaN};
-const BRANDS=[['Aral',/\bara[l1i]\b/i],['Shell',/\bshe[l1i]{2}\b/i],['Esso',/\be[s5]{2}[o0]\b/i],['JET',/\bjet\b/i],['TotalEnergies',/\btotal/i],
-  ['Avia',/\bavia\b/i],['Star',/\bstar\b/i],['Agip',/\bagip\b/i],['Eni',/\beni\b/i],['Westfalen',/westfalen/i],['HEM',/\bhem\b/i],['Q1',/\bq1\b/i],
-  ['Raiffeisen',/raiffeisen/i],['OMV',/\bomv\b/i],['bft',/\bbft\b/i],['Tamoil',/tamoil/i],['Orlen',/orlen/i],['Hoyer',/hoyer/i],['Classic',/\bclassic\b/i]];
 function parse(text){
   const lines=String(text||'').split(/\r?\n/).map(l=>l.replace(/[|]/g,' ').replace(/\s+/g,' ').trim()).filter(Boolean);
   const r={},why={};
@@ -60,9 +80,16 @@ function parse(text){
   // Wäsche falsch gelesen (z. B. 12,3 statt 12,90)? Gesamt − Kraftstoff gewinnt, wenn plausibel
   if(r.gesamt&&r.betrag&&r.waesche&&!near(r.betrag+r.waesche,r.gesamt,.02)){const d=Math.round((r.gesamt-r.betrag)*100)/100;if(d>0&&d<100)r.waesche=d}
   if(r.gesamt&&r.betrag&&!r.waesche&&r.gesamt-r.betrag>=3&&r.gesamt-r.betrag<=40&&lines.some(l=>/wasch|w.sche/i.test(l)))r.waesche=Math.round((r.gesamt-r.betrag)*100)/100;
-  /* Tankstelle: Marke in den ersten Zeilen + Ort aus der Postleitzahl */
-  const headL=lines.slice(0,18);let brand='';for(const [n,re] of BRANDS){if(headL.some(l=>re.test(l))){brand=n;break}}
-  let ort='';for(const l of headL){const m=l.match(/\b\d{5}\s+([A-ZÄÖÜ][A-Za-zÄÖÜäöüß.\- ]{2,30})/);if(m){ort=m[1].trim().replace(/\s+\d.*$/,'');break}}
+  /* Tankstelle: Marke (auch unscharf, z. B. „E5S0“ = Esso) + Adresse */
+  const brand=findBrand(lines);
+  let ort='',plz='',strasse='';
+  for(let i=0;i<Math.min(lines.length,18);i++){const m=lines[i].match(/\b(\d{5})\s+([A-ZÄÖÜ][A-Za-zÄÖÜäöüß.\- ]{2,30})/);
+    if(m){plz=m[1];ort=m[2].trim().replace(/\s+\d.*$/,'');
+      for(let j=i-1;j>=Math.max(0,i-3);j--){const sm=lines[j].match(/([A-ZÄÖÜ][A-Za-zÄÖÜäöüß.\- ]*?(?:stra(?:ss|ß)e|str\.?|weg|allee|platz|ring|damm|chaussee|gasse|ufer|landstr\w*)[a-z]*)\s*(\d{1,4}\s?[a-zA-Z]?)?\b/i);
+        if(sm){strasse=(sm[1].replace(/strasse\b/i,'straße').replace(/strass[oa0]\b/i,'straße')+(sm[2]?' '+sm[2].replace(/\s/g,''):'')).trim();break}}
+      break}}
+  if(brand)r.marke=brand;
+  if(plz){r.plz=plz;r.ort=ort;if(strasse)r.strasse=strasse;r.adresse=[strasse,plz+' '+ort].filter(Boolean).join(', ')}
   if(brand||ort)r.station=[brand,ort].filter(Boolean).join(' ');
   /* Prüfstatus */
   r.ok=!!(r.liter&&r.ppl&&r.betrag&&near(r.liter*r.ppl,r.betrag,.06));
@@ -108,5 +135,5 @@ async function read(file,progress){
   const [w,canvas]=await Promise.all([worker(),prepare(file)]);
   const {data}=await w.recognize(canvas);
   onProg=null;const r=parse(data.text);r.text=data.text;return r}
-g.TankOCR={read,parse,prepare,warm:()=>worker().catch(()=>{})};
+g.TankOCR={read,parse,prepare,lev,streetKey,warm:()=>worker().catch(()=>{})};
 })(typeof window!=='undefined'?window:globalThis);
