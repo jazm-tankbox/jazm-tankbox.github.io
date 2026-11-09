@@ -1,4 +1,8 @@
-# MyTankBox – Test-App 0.9.0.1
+# MyTankBox – Test-App 0.9.1.1
+
+## Neu in 0.9.1
+
+- Karte: Dein Standort ist jetzt ein größerer dunkler Punkt mit weißem Rand und pulsierendem Ring, immer über den Tankstellen, dazu ein heller Kreis für die Ortungsgenauigkeit. Neuer Knopf unten rechts holt die Karte zurück zu deinem Standort.
 
 ## Neu in 0.9 – Karte und Bilder je Marke
 

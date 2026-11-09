@@ -1,6 +1,6 @@
 (function(){
 'use strict';
-const APP_VERSION='0.9.0.1';
+const APP_VERSION='0.9.1.1';
 /* Eigener Speicher je Adresse: die Live-App unter / behält ihre Namen, eine Test-App unter /test/ bekommt eigene */
 const BASE=location.pathname.replace(/[^/]*$/,'');
 const NS=BASE==='/'?'':BASE.replace(/^\/|\/$/g,'').replace(/[^a-z0-9]+/gi,'-').toLowerCase()+'-';
@@ -731,7 +731,7 @@ const viewSeg=()=>`<button type="button" data-view="liste" aria-pressed="${nearS
 function nearHtml(){
   const st=nearState,items=nearItems(),all=st.only?items.filter(x=>x.ok):items,hidden=items.length-all.length,shown=all.slice(0,50);
   if(st.view==='karte')return `<div class="nearctl"><div class="seg two">${viewSeg()}</div></div>
-    ${st.shell?`<div class="mapfull" id="nMap"></div><p class="hint">${nf(st.shell.n,0)} Stationen aus der Shell-Liste vom ${fmtS(st.shell.stand)}. Punkt antippen für Details und Route. Farben: Shell gelb, Esso blau, Eni/Agip grün, Westfalen rot, Markant violett, andere grau.</p>`
+    ${st.shell?`<div class="mapfull" id="nMap"></div><p class="hint">${nf(st.shell.n,0)} Stationen aus der Shell-Liste vom ${fmtS(st.shell.stand)}. Dein Standort: dunkler Punkt mit pulsierendem Ring. Punkt antippen für Details und Route. Farben: Shell gelb, Esso blau, Eni/Agip grün, Westfalen rot, Markant violett, andere grau.</p>`
       :'<div class="note">Für die Karte zuerst die Shell-Liste importieren: Daten → Tankstellen → „Shell-Liste importieren (CSV)“.</div>'}`;
   return `<div class="nearctl"><div class="seg two">${viewSeg()}</div>
       <div class="seg" role="radiogroup" aria-label="Umkreis">${[5,10,25].map(r=>`<button type="button" data-r="${r}" aria-pressed="${st.r===r}">${r} km</button>`).join('')}</div>
@@ -834,7 +834,13 @@ async function drawMap(el,st){
       addr:[addr,[plz,city].filter(Boolean).join(' ')].filter(Boolean).join(', '),open:fl&1?'24/7':'',adblue:!!(fl&2),wash:!!(fl&4),tel,ok:true};openNearDetail(x)};
   for(const a of items){const m=L.circleMarker([a[0],a[1]],{radius:6,weight:1.5,color:'#fff',fillColor:BRAND_COLOR(a[2]),fillOpacity:.95}).addTo(map);
     m.bindTooltip(`${esc(a[2]||'Tankstelle')} · ${esc(a[3])}, ${esc(a[5])}`,{direction:'top'});m.on('click',()=>{buzz(4);show(a)})}
-  if(st.pos)L.circleMarker([st.pos.lat,st.pos.lon],{radius:8,weight:3,color:'#fff',fillColor:'#B4530F',fillOpacity:1}).addTo(map).bindTooltip('Du bist hier');
+  if(st.pos){const me=[st.pos.lat,st.pos.lon];
+    // Genauigkeit als heller Kreis, darüber ein eigener, pulsierender Standort-Punkt – anders als die runden Tankstellen-Punkte
+    if(st.pos.acc&&st.pos.acc<3000)L.circle(me,{radius:st.pos.acc,weight:1,color:'#111827',opacity:.35,fillColor:'#111827',fillOpacity:.08,interactive:false}).addTo(map);
+    L.marker(me,{icon:L.divIcon({className:'mepin',html:'<span class="mepulse"></span><span class="medot"></span>',iconSize:[44,44],iconAnchor:[22,22]}),zIndexOffset:1000,keyboard:false,interactive:false}).addTo(map);
+    const b=document.createElement('button');b.type='button';b.className='mebtn';b.setAttribute('aria-label','Zu meinem Standort');b.title='Zu meinem Standort';
+    b.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>';
+    b.onclick=e=>{e.stopPropagation();buzz(4);map.setView(me,Math.max(map.getZoom(),13))};el.appendChild(b)}
   setTimeout(()=>map.invalidateSize(),250);
   return map}
 
