@@ -1,6 +1,6 @@
 (function(){
 'use strict';
-const APP_VERSION='0.5.2.1';
+const APP_VERSION='0.5.3.1';
 /* Eigener Speicher je Adresse: die Live-App unter / behält ihre Namen, eine Test-App unter /test/ bekommt eigene */
 const BASE=location.pathname.replace(/[^/]*$/,'');
 const NS=BASE==='/'?'':BASE.replace(/^\/|\/$/g,'').replace(/[^a-z0-9]+/gi,'-').toLowerCase()+'-';
@@ -588,9 +588,18 @@ function openSvcForm(id,typ){
 /* ---------- Tankstellen merken: Adresse → Name ----------
    Gleiche Postleitzahl + ähnlicher Straßenname (Lesefehler und Hausnummer egal) = dieselbe Tankstelle */
 function addrParts(a){const m=String(a||'').match(/^(.*?),?\s*(\d{5})\b/);return m?{strasse:m[1].trim(),plz:m[2]}:null}
-function findStation(plz,strasse){if(!plz||!window.TankOCR)return null;const k=TankOCR.streetKey(strasse);
-  let best=null,bd=9;for(const st of db.stationen){if(st.plz!==plz)continue;const d=k&&st.key?TankOCR.lev(k,st.key):(k||st.key?9:0);if(d<bd){bd=d;best=st}}
-  return best&&bd<=2?best:null}
+function findStation(plz,strasse,raw){if(!plz||!window.TankOCR)return null;const k=TankOCR.streetKey(strasse);
+  const inPlz=db.stationen.filter(st=>st.plz===plz);
+  let best=null,bd=9;for(const st of inPlz){const d=k&&st.key?TankOCR.lev(k,st.key):(k||st.key?9:0);if(d<bd){bd=d;best=st}}
+  if(best&&bd<=2)return best;
+  // Straße unlesbar (z. B. „Bamler yet rasso ',3“): verlesene Zeile mit gemerkten Straßen vergleichen
+  if(raw!==undefined&&inPlz.length){const rk=String(raw).toLowerCase().replace(/[^a-zäöüß]/g,'');
+    if(inPlz.length===1&&(!k||!rk||sim(rk,inPlz[0].key)>=.4))return inPlz[0];
+    let b2=null,bs=0;for(const st of inPlz){const v=sim(rk,st.key);if(v>bs){bs=v;b2=st}}if(b2&&bs>=.5)return b2}
+  return null}
+/* Ähnlichkeit 0..1 über gemeinsame Buchstabenpaare (robust gegen eingeschobene Fehlzeichen) */
+function sim(a,b){if(!a||!b)return 0;const g=s=>{const m=new Map();for(let i=0;i<s.length-1;i++){const x=s.slice(i,i+2);m.set(x,(m.get(x)||0)+1)}return m};
+  const A=g(a),B=g(b);let n=0;for(const [x,c] of A)n+=Math.min(c,B.get(x)||0);return 2*n/Math.max(1,(a.length-1)+(b.length-1))}
 function rememberStation(name,adresse){if(!name)return;const a=addrParts(adresse);
   if(!a||!window.TankOCR){if(!db.stationen.some(x=>x.name===name))db.stationen.push({name});return}
   const k=TankOCR.streetKey(a.strasse),hit=findStation(a.plz,a.strasse);
@@ -739,11 +748,11 @@ function openForm(id,withPhoto){
       if(put('betrag',r.betrag&&fx(r.betrag,2)))got.push(eur(r.betrag));
       if(put('waesche',r.waesche&&fx(r.waesche,2)))got.push('Wäsche '+eur(r.waesche));
       if(r.sorte&&SORTEN.includes(r.sorte))put('sorte',r.sorte);
-      const known=findStation(r.plz,r.strasse);
+      const known=findStation(r.plz,r.strasse,r.strRaw||'');
       if(known){put('station',known.name);put('adresse',known.adresse);if(known.name)got.push(known.name+' (bekannt)')}
       else{put('station',r.station);if(put('adresse',r.adresse))got.push(r.adresse);else if(r.station)got.push(r.station)}
       live();buzz(got.length?[8,40,8]:[20,40,20]);
-      const miss=[!r.km&&'Kilometerstand',!r.liter&&'Liter',!r.betrag&&'Betrag'].filter(Boolean);
+      const miss=[!r.km&&'Kilometerstand',!r.liter&&'Liter',!r.betrag&&'Betrag',r.plz&&!r.strasse&&!known&&'Straße (einmal eintragen, danach erkennt die App die Tankstelle)'].filter(Boolean);
       focr.className='hint '+(miss.length||!r.ok?'ocrwarn':'ocrok');
       focr.innerHTML=got.length?`<b>Erkannt:</b> ${esc(got.join(' · '))}.`+(miss.length?` <b>Nicht gefunden:</b> ${esc(miss.join(', '))} – bitte ergänzen.`:r.ok&&r.sumOk!==false?' Rechnung geht auf ✓ Bitte kurz prüfen.':' Bitte prüfen.')
         :'Auf dem Foto wurde nichts Brauchbares erkannt. Tipp: Quittung flach hinlegen, gerade von oben fotografieren, ohne Schatten.';

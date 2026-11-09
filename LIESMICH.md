@@ -1,4 +1,9 @@
-# MyTankBox – Test-App 0.5.2.1
+# MyTankBox – Test-App 0.5.3.1
+
+## Neu in 0.5.3
+
+- Marke auch bei stark verlesenem Kopf erkannt („ESS Stat ton“ = Esso). „Stat“ wird nicht mehr als Star gewertet.
+- Ist die Straße unlesbar, zeigt die App das unter „Nicht gefunden“ an. Trägst du sie einmal ein, erkennt die App die Tankstelle beim nächsten Mal über Postleitzahl und die verlesene Zeile und setzt Name und vollständige Adresse ein.
 
 ## Neu in 0.5.2
 

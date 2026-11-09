@@ -25,10 +25,11 @@ function matchBrand(tok,loose){const t=deDigit(tok);if(t.length<2)return '';
   for(const [n,k] of BRANDLIST){if(k.length>=4&&t.length===k.length&&t.slice(1)===k.slice(1))return n}
   return ''}
 function findBrand(lines){
+  const STAT=/\bs\s?t\s?a\s?t\s?[il1t!]?\s?[io0]\s?n\b|\btankstelle\b/i;
   const clean=l=>l.replace(/euro\s?shell|shell\s?(card|flot)|dkv|uta\b|routex|aral\s?card/ig,' ');
-  // 1) Kopfzeilen, 2) „X Station“, 3) „X Deutschland GmbH“ im Kleingedruckten
-  for(const l of lines.slice(0,8).map(clean)){for(const tok of l.split(/[\s,.:;()/]+/)){const b=matchBrand(tok);if(b&&tok.length<=16)return b}}
-  for(const l of lines.map(clean)){const m=l.match(/([A-Za-z0-9]{2,12})\s+(?:station|tankstelle)\b/i);if(m){const b=matchBrand(m[1],true);if(b)return b}}
+  // 1) „X Station“ (auch verlesen wie „ESS Stat ton“), 2) Kopfzeilen, 3) „X Deutschland GmbH“ im Kleingedruckten
+  for(const l of lines.map(clean)){const m=l.match(new RegExp('([A-Za-z0-9]{2,12})\\s+(?:'+STAT.source+')','i'));if(m){const b=matchBrand(m[1],true);if(b)return b}}
+  for(const l of lines.slice(0,8).map(clean)){for(const tok of l.replace(new RegExp(STAT.source,'ig'),' ').replace(/\bstat\b/ig,' ').split(/[\s,.:;()/]+/)){const b=matchBrand(tok);if(b&&tok.length<=16)return b}}
   for(const l of lines.map(clean)){const m=l.match(/([A-Za-z0-9]{2,12})\s+(?:deutschland|germany)\s+g\w{2,3}h/i);if(m){const b=matchBrand(m[1],true);if(b)return b}}
   return ''}
 const streetKey=s=>String(s||'').toLowerCase().replace(/stra(ss|ß)e|str\.?/g,'str').replace(/\d.*$/,'').replace(/[^a-zäöüß]/g,'');
@@ -94,6 +95,7 @@ function parse(text){
     if(!m||(m[1].match(/\d/g)||[]).length<3)continue;
     const pz=digitsFix(m[1]);if(!/^\d{5}$/.test(pz)||pz<'01000')continue;
     plz=pz;ort=m[2].replace(/\s+(?:Tel|Fax|Telefon|St\.?-?Nr|USt|www)\b.*$/i,'').replace(/[.,\-\s]+$/,'').trim();
+    r.strRaw=(L.slice(0,m.index).trim()||lines[i-1]||'');
     // Straße: gleiche Zeile vor der PLZ, sonst bis zu 4 Zeilen darüber
     const before=L.slice(0,m.index).trim();const cand=before?[before]:[];
     for(let j=i-1;j>=Math.max(0,i-4);j--)cand.push(lines[j]);
