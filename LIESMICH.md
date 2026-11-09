@@ -1,4 +1,10 @@
-# MyTankBox – Test-App 0.6.2.1
+# MyTankBox – Test-App 0.7.0.1
+
+## Neu in 0.7 – Tankstellenliste aus GitHub
+
+- Die Overpass-Server lassen Anfragen direkt aus Web-Apps nicht zu („Failed to fetch“). Deshalb lädt jetzt der GitHub-Ablauf `.github/workflows/tankstellen.yml` am 1. jedes Monats alle Tankstellen Deutschlands aus OpenStreetMap und legt sie als `tankstellen.json` neben die App.
+- „Tankstellen in der Nähe“ sucht in dieser Liste direkt auf dem Handy: schnell, auch offline, und der Standort wird nicht mehr gesendet. Angezeigt werden höchstens die 50 nächsten.
+- **Einmalig einrichten:** `tankstellen.yml` auf GitHub unter `.github/workflows/` anlegen (Add file → Create new file, Inhalt hineinkopieren), dann Actions → „Tankstellen aktualisieren“ → „Run workflow“. Nach 2–3 Minuten ist die Liste da. Die Datei wird bei App-Updates nicht angetastet.
 
 ## Neu in 0.6.2
 

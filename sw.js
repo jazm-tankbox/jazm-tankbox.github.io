@@ -2,7 +2,7 @@
 // Eigene Namen je Adresse: Live unter / wie bisher, eine Test-App unter /test/ mit Präfix „test-“
 const SCOPE_PATH = new URL(self.registration.scope).pathname;
 const NS = SCOPE_PATH === '/' ? '' : SCOPE_PATH.replace(/^\/|\/$/g, '').replace(/[^a-z0-9]+/gi, '-').toLowerCase() + '-';
-const CACHE = NS + 'tankbox-0.6.2.1';
+const CACHE = NS + 'tankbox-0.7.0.1';
 const FILES = ['./', 'index.html', 'app.js', 'ocr.js', 'ds.js', 'manifest.webmanifest',
   'boxen/smartbox.png', 'boxen/gesundbox.png', 'boxen/belegbox.png', 'boxen/tankbox.png',
   'icons/tankbox-192.png', 'icons/tankbox-512.png', 'icons/tankbox-maskable-192.png', 'icons/tankbox-maskable-512.png',
@@ -31,6 +31,12 @@ self.addEventListener('fetch', e => {
     return;
   }
   if (url.origin !== location.origin) return;
+  // Tankstellenliste: erst aus dem Netz (monatlich neu), sonst die gespeicherte – auch offline
+  if (url.pathname.endsWith('/tankstellen.json')) {
+    e.respondWith(caches.open(NS + 'daten-v1').then(c => fetch(req).then(r => { if (r.ok) c.put(req, r.clone()).catch(() => {}); return r; })
+      .catch(() => c.match(req, { ignoreSearch: true }).then(hit => hit || Response.error()))));
+    return;
+  }
   // Alles aus dem Cache des aktuellen Stands, damit Seite und Skript immer zusammenpassen.
   if (req.mode === 'navigate') { e.respondWith(caches.match('index.html').then(r => r || fetch(req))); return; }
   e.respondWith(caches.match(req, { ignoreSearch: true }).then(r => r || fetch(req)));
