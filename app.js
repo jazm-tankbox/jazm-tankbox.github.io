@@ -1,6 +1,6 @@
 (function(){
 'use strict';
-const APP_VERSION='0.6.0.1';
+const APP_VERSION='0.6.2.1';
 /* Eigener Speicher je Adresse: die Live-App unter / behält ihre Namen, eine Test-App unter /test/ bekommt eigene */
 const BASE=location.pathname.replace(/[^/]*$/,'');
 const NS=BASE==='/'?'':BASE.replace(/^\/|\/$/g,'').replace(/[^a-z0-9]+/gi,'-').toLowerCase()+'-';
@@ -686,21 +686,28 @@ const CARD_BRANDS=[
   {k:'omv',n:'OMV',re:/\bomv\b/i},
   {k:'westfalen',n:'Westfalen',re:/\bwestfalen\b/i},
   {k:'orlen',n:'star / ORLEN',re:/\b(star|orlen)\b/i}];
-const OVERPASS=['https://overpass-api.de/api/interpreter','https://overpass.kumi.systems/api/interpreter'];
+/* overpass-api.de sperrt seit April 2026 Anfragen direkt aus Browsern (Fehler 406) – daher zuerst freie Alternativen */
+const OVERPASS=['https://overpass.private.coffee/api/interpreter','https://overpass.kumi.systems/api/interpreter','https://overpass-api.de/api/interpreter'];
 const cardOn=()=>{const m=db.meta.cardBrands;return Array.isArray(m)?m:CARD_BRANDS.map(b=>b.k)};
 const brandOf=t=>{const s=[t.brand,t.name,t.operator].filter(Boolean).join(' ');for(const b of CARD_BRANDS)if(b.re.test(s))return b;return null};
 const distKm=(a,b,c,d)=>{const R=6371,r=x=>x*Math.PI/180,dl=r(c-a),dn=r(d-b);const h=Math.sin(dl/2)**2+Math.cos(r(a))*Math.cos(r(c))*Math.sin(dn/2)**2;return 2*R*Math.asin(Math.sqrt(h))};
 const fmtDist=k=>k<1?Math.round(k*1000/10)*10+' m':nf(k,k<10?1:0)+' km';
 let nearState={r:10,only:true,pos:null,list:null,err:'',busy:false};
-function getPos(){return new Promise((res,rej)=>{if(!navigator.geolocation){rej(new Error('Dieses Gerät kann den Standort nicht bestimmen.'));return}
-  navigator.geolocation.getCurrentPosition(p=>res({lat:p.coords.latitude,lon:p.coords.longitude,acc:p.coords.accuracy}),
-    e=>rej(new Error(e.code===1?'Standortzugriff wurde abgelehnt. Erlaube ihn in den Browser-Einstellungen für diese App.':'Standort konnte nicht bestimmt werden. Ist GPS an?')),
-    {enableHighAccuracy:true,timeout:15000,maximumAge:120000})})}
+function getPos(){
+  const once=(hi,t)=>new Promise((res,rej)=>navigator.geolocation.getCurrentPosition(p=>res({lat:p.coords.latitude,lon:p.coords.longitude,acc:p.coords.accuracy}),rej,{enableHighAccuracy:hi,timeout:t,maximumAge:300000}));
+  if(!navigator.geolocation)return Promise.reject(new Error('Dieses Gerät kann den Standort nicht bestimmen.'));
+  // erst genau (GPS), sonst grob (Netz/WLAN) – drinnen klappt GPS oft nicht
+  return once(true,10000).catch(e=>e&&e.code===1?Promise.reject(e):once(false,15000)).catch(e=>{
+    throw new Error(e&&e.code===1?'Standortzugriff ist für die App gesperrt. Erlaube ihn: Chrome → ⋮ → Einstellungen → Website-Einstellungen → Standort, oder in den Android-Einstellungen der App.':'Standort konnte nicht bestimmt werden. Ist der Standort (GPS) am Handy eingeschaltet?')})}
 async function overpass(lat,lon,rKm){
   const q=`[out:json][timeout:25];nwr["amenity"="fuel"](around:${Math.round(rKm*1000)},${lat.toFixed(5)},${lon.toFixed(5)});out center tags;`;
-  let last;for(const u of OVERPASS){try{const r=await fetch(u,{method:'POST',body:'data='+encodeURIComponent(q),headers:{'Content-Type':'application/x-www-form-urlencoded'}});
-      if(!r.ok)throw new Error('HTTP '+r.status);const j=await r.json();return j.elements||[]}catch(e){last=e}}
-  throw last||new Error('offline')}
+  const errs=[];
+  for(const u of OVERPASS){const host=new URL(u).hostname;try{
+      const ctl=new AbortController(),tm=setTimeout(()=>ctl.abort(),20000);
+      const r=await fetch(u,{method:'POST',body:'data='+encodeURIComponent(q),headers:{'Content-Type':'application/x-www-form-urlencoded'},signal:ctl.signal,referrerPolicy:'origin'});
+      clearTimeout(tm);if(!r.ok)throw new Error('HTTP '+r.status);const j=await r.json();if(!Array.isArray(j.elements))throw new Error('ungültige Antwort');return j.elements}
+    catch(e){errs.push(host+': '+(e&&e.name==='AbortError'?'keine Antwort':(e&&e.message)||'Fehler'))}}
+  const er=new Error('data');er.detail=errs.join(' · ');throw er}
 function nearItems(){
   const {pos,list}=nearState;if(!pos||!list)return [];
   return list.map(e=>{const t=e.tags||{},lat=e.lat??(e.center&&e.center.lat),lon=e.lon??(e.center&&e.center.lon);if(lat==null)return null;
@@ -714,26 +721,49 @@ function nearHtml(){
   return `<div class="nearctl">
       <div class="seg" role="radiogroup" aria-label="Umkreis">${[5,10,25].map(r=>`<button type="button" data-r="${r}" aria-pressed="${st.r===r}">${r} km</button>`).join('')}</div>
       <label class="check"><input type="checkbox" id="nOnly"${st.only?' checked':''}> nur mit Shell Card</label></div>
-    ${st.busy?'<p class="hint">⏳ Suche Tankstellen …</p>':st.err?`<div class="note">${esc(st.err)}</div>`:!st.list?'':
+    ${st.busy?`<p class="hint">⏳ ${esc(st.step||'Suche …')}</p>`:st.err?`<div class="note">${esc(st.err)}${st.detail?`<br><small>${esc(st.detail)}</small>`:''}</div><div class="actions"><button type="button" class="btn" id="nRetry">Nochmal versuchen</button></div>`:!st.list?'':
       shown.length?`<div class="list">${shown.map((x,i)=>{const known=db.stationen.find(s=>x.brand&&new RegExp(x.brand.re.source,'i').test(s.name)&&s.adresse&&x.addr&&TankOCR&&s.plz&&x.addr.includes(s.plz)&&TankOCR.lev(TankOCR.streetKey(x.addr.split(',')[0]),s.key)<=2);
-        return `<div class="row near" style="--j:${i}">${badge(known,x.brand?x.brand.n.split(' ')[0]:x.name)}<span class="main"><span class="t">${esc(known?known.name:x.label)}</span>
+        return `<div class="row near" role="button" tabindex="0" data-nid="${esc(x.id)}" style="--j:${i}">${badge(known,x.brand?x.brand.n.split(' ')[0]:x.name)}<span class="main"><span class="t">${esc(known?known.name:x.label)}</span>
           <span class="s">${esc(x.addr||'Adresse unbekannt')}</span>
           <span class="s">${x.ok?'<span class="pill ok">Shell Card</span> ':x.brand?'':'<span class="pill">Akzeptanz unbekannt</span> '}${x.open==='24/7'?'24 h geöffnet':x.open?esc(x.open.length>40?x.open.slice(0,40)+'…':x.open):''}</span></span>
-          <span class="ramt"><b class="num">${fmtDist(x.d)}</b><a class="ghost sm" href="https://www.google.com/maps/dir/?api=1&destination=${x.lat},${x.lon}" target="_blank" rel="noopener noreferrer">Route</a></span></div>`}).join('')}</div>`
+          <span class="ramt"><b class="num">${fmtDist(x.d)}</b><a class="ghost sm" data-route href="${routeUrl(x)}" target="_blank" rel="noopener noreferrer">Route</a></span></div>`}).join('')}</div>`
       :`<div class="list"><div class="empty">Keine passende Tankstelle im Umkreis von ${st.r} km.${hidden?' Größeren Umkreis wählen oder Filter ausschalten.':''}</div></div>`}
     ${st.list&&!st.busy&&!st.err?`<p class="hint">${shown.length} von ${items.length} Tankstellen${hidden&&st.only?` · ${hidden} ohne Shell-Card-Akzeptanz ausgeblendet`:''}. Akzeptanz nach Marke (Stand der Shell-Übersicht 08/2023, unter Daten → Tankstellen änderbar). Einzelne Stationen können abweichen.</p>`:''}
     <p class="hint">Für die Suche wird dein ungefährer Standort an OpenStreetMap (Overpass-Server) gesendet. Kartendaten © OpenStreetMap-Mitwirkende.</p>`}
-function openNear(){
+const routeUrl=x=>`https://www.google.com/maps/dir/?api=1&amp;destination=${x.lat},${x.lon}`;
+const geoUrl=x=>`geo:${x.lat},${x.lon}?q=${x.lat},${x.lon}(${encodeURIComponent(x.label)})`;
+function openNearDetail(x){
+  const d=.006,bbox=[x.lon-d*1.6,x.lat-d,x.lon+d*1.6,x.lat+d].map(v=>v.toFixed(5)).join(',');
+  openSheet(head(esc(x.label))+`
+    <div class="mapbox"><iframe title="Karte" loading="lazy" referrerpolicy="no-referrer" src="https://www.openstreetmap.org/export/embed.html?bbox=${bbox}&amp;layer=mapnik&amp;marker=${x.lat.toFixed(5)},${x.lon.toFixed(5)}"></iframe></div>
+    <dl class="kv">
+      <dt>Adresse</dt><dd>${esc(x.addr||'unbekannt')}</dd>
+      <dt>Entfernung</dt><dd class="num">${fmtDist(x.d)} Luftlinie</dd>
+      ${x.open?`<dt>Geöffnet</dt><dd>${x.open==='24/7'?'24 Stunden':esc(x.open)}</dd>`:''}
+      <dt>Shell Card</dt><dd>${x.ok?'<span class="pill ok">wird angenommen</span>':x.brand?'nicht in deiner Akzeptanzliste':'unbekannt (Marke fehlt in OpenStreetMap)'}</dd>
+    </dl>
+    <div class="actions"><a class="btn primary" href="${routeUrl(x)}" target="_blank" rel="noopener noreferrer">Route starten</a><a class="btn" href="${geoUrl(x)}">In Karten-App öffnen</a></div>
+    <div class="actions"><button type="button" class="btn" id="nBack">‹ Zurück zur Liste</button></div>
+    <p class="hint">Karte © OpenStreetMap-Mitwirkende.</p>`,
+  s=>{s.querySelector('#nBack').onclick=()=>openNear(true)});
+}
+function openNear(keep){
   openSheet(head('Tankstellen in der Nähe')+'<div id="nearBody"></div>',async s=>{
     const body=s.querySelector('#nearBody');
     const draw=()=>{body.innerHTML=nearHtml();
       body.querySelectorAll('[data-r]').forEach(b=>b.onclick=()=>{nearState.r=+b.dataset.r;buzz(4);search()});
-      body.querySelector('#nOnly').onchange=e=>{nearState.only=e.target.checked;draw()}};
-    const search=async()=>{nearState.busy=true;nearState.err='';draw();
-      try{nearState.pos=await getPos();nearState.list=await overpass(nearState.pos.lat,nearState.pos.lon,nearState.r)}
-      catch(e){nearState.err=e&&e.message&&!/^HTTP|fetch|offline/i.test(e.message)?e.message:'Die Tankstellen-Daten konnten nicht geladen werden. Besteht eine Internetverbindung?'}
-      nearState.busy=false;if(body.isConnected)draw()};
-    draw();search();
+      body.querySelector('#nOnly').onchange=e=>{nearState.only=e.target.checked;draw()};
+      const rt=body.querySelector('#nRetry');if(rt)rt.onclick=()=>search();
+      const items=nearItems();
+      body.querySelectorAll('[data-nid]').forEach(r=>{const go=e=>{if(e.target.closest('[data-route]'))return;const x=items.find(i=>i.id===r.dataset.nid);if(x){buzz(4);openNearDetail(x)}};
+        r.onclick=go;r.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();go(e)}}})};
+    const search=async()=>{const st=nearState;st.busy=true;st.err='';st.detail='';st.step='Standort wird bestimmt …';draw();
+      try{st.pos=await getPos();}catch(e){st.busy=false;st.err=e.message;if(body.isConnected)draw();return}
+      st.step='Tankstellen werden geladen …';if(body.isConnected)draw();
+      try{st.list=await overpass(st.pos.lat,st.pos.lon,st.r)}
+      catch(e){st.err=navigator.onLine===false?'Keine Internetverbindung.':'Die Tankstellen-Daten konnten nicht geladen werden (OpenStreetMap-Server nicht erreichbar).';st.detail=e.detail||''}
+      st.busy=false;if(body.isConnected)draw()};
+    draw();if(!(keep&&nearState.list))search();
   });
 }
 function cardBrandsHtml(){const on=cardOn();

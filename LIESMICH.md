@@ -1,4 +1,14 @@
-# MyTankBox – Test-App 0.6.0.1
+# MyTankBox – Test-App 0.6.2.1
+
+## Neu in 0.6.2
+
+- Tankstellen in der Nähe: Der Hauptserver overpass-api.de sperrt seit April 2026 Anfragen direkt aus Browsern. Die App fragt jetzt zuerst den freien Server overpass.private.coffee, dann overpass.kumi.systems, zuletzt overpass-api.de.
+- Standort: erst genau per GPS, bei Bedarf grob über Netz/WLAN (drinnen klappt GPS oft nicht). Klarer Hinweis, wenn der Standortzugriff gesperrt ist.
+- Anzeige, in welchem Schritt die Suche ist, bei Fehlern die Rückmeldung jedes Servers und „Nochmal versuchen“.
+
+## Neu in 0.6.1
+
+- Tankstellen in der Nähe: Antippen einer Tankstelle öffnet eine Karte (OpenStreetMap) mit der Station, Adresse, Entfernung, Öffnungszeiten und Shell-Card-Status. Darunter „Route starten“ (Google Maps) und „In Karten-App öffnen“ (Auswahl der Karten-App auf dem Handy). „Zurück zur Liste“ ohne neue Suche.
 
 ## Neu in 0.6 – Tankstellen in der Nähe
 
