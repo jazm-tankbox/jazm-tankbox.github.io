@@ -1,6 +1,6 @@
 (function(){
 'use strict';
-const APP_VERSION='0.11.1.1';
+const APP_VERSION='0.12.0.1';
 /* Eigener Speicher je Adresse: die Live-App unter / behält ihre Namen, eine Test-App unter /test/ bekommt eigene */
 const BASE=location.pathname.replace(/[^/]*$/,'');
 const NS=BASE==='/'?'':BASE.replace(/^\/|\/$/g,'').replace(/[^a-z0-9]+/gi,'-').toLowerCase()+'-';
@@ -341,7 +341,7 @@ function render(){
   document.querySelectorAll('nav.tabs [data-tab]').forEach(b=>b.setAttribute('aria-current',b.dataset.tab===tab?'page':'false'));
   setInd(TABS.indexOf(tab));
   const s=stats();
-  if(tab==='home')main.innerHTML=viewHome(s);else if(tab==='liste')main.innerHTML=viewList(s);else main.innerHTML=viewStats(s);
+  if(tab==='home')main.innerHTML=viewHome(s);else if(tab==='liste')main.innerHTML=viewList(s);else{main.innerHTML=viewStats(s);bindStats()}
   main.querySelectorAll('[data-fill]').forEach(b=>b.onclick=()=>openDetail(b.dataset.fill));
   main.querySelectorAll('[data-fz]').forEach(b=>b.onclick=()=>openFz());
   main.querySelectorAll('[data-svc]').forEach(b=>b.onclick=()=>openSvcDetail(b.dataset.svc));
@@ -381,26 +381,145 @@ function viewList(s){
     const lit=fs.filter(f=>!f.typ).reduce((a,f)=>a+(+f.liter||0),0);
     return `<div><div class="sechead"><h2>${MON[m-1]} ${y}</h2><span class="count num">${eur(fs.reduce((a,f)=>a+cost(f),0))}${lit?' · '+nf(lit,1)+' l':''}</span></div>
       <div class="list" style="margin-top:10px">${fs.map((f,i)=>entryRow(f,s.c,i)).join('')}</div></div>`}).join('')}</section>`}
+/* ---------- Auswertung: Zeitraum, Fahrzeug(e), Grafiken ---------- */
+let stv={p:'12m',all:false};
+const scopeF=()=>stv.all?db.fills:VF(),scopeS=()=>stv.all?db.services:VS();
+function yearsAvail(){return [...new Set(scopeF().map(e=>e.datum.slice(0,4)))].sort().reverse()}
+function periodRange(){
+  if(stv.p==='12m'){const R=stv.all?new Date():refDate();const a=new Date(R.getFullYear(),R.getMonth()-11,1);return {from:iso(a).slice(0,7),to:iso(R).slice(0,7),label:'letzte 12 Monate'}}
+  if(stv.p==='all'){const d=scopeF().map(e=>e.datum).sort();return {from:(d[0]||iso(new Date())).slice(0,7),to:(d[d.length-1]||iso(new Date())).slice(0,7),label:'gesamter Zeitraum'}}
+  return {from:stv.p+'-01',to:stv.p+'-12',label:stv.p}}
+const inP=(e,r)=>{const m=e.datum.slice(0,7);return m>=r.from&&m<=r.to};
+function monthsBetween(a,b){const out=[];let [y,m]=a.split('-').map(Number);const [y2,m2]=b.split('-').map(Number);while(y<y2||(y===y2&&m<=m2)){out.push(y+'-'+String(m).padStart(2,'0'));m++;if(m>12){m=1;y++}}return out}
+/* Verbrauch je Tankung, je Fahrzeug getrennt gerechnet */
+function calcScope(){const c={};(stv.all?db.fahrzeuge:[fzOf(curFz())]).filter(Boolean).forEach(f=>Object.assign(c,calc(db.fills.filter(e=>e.fz===f.id))));return c}
+/* Gefahrene km im Zeitraum, je Fahrzeug aus allen km-Angaben */
+function kmDriven(r){let sum=0;
+  for(const f of (stv.all?db.fahrzeuge:[fzOf(curFz())]).filter(Boolean)){
+    // nur km aus deiner Nutzungszeit (ab Übernahme, bis Abgabe) – ältere Einträge des Wagens (z. B. TÜV beim Vorbesitzer) zählen nicht
+    const pts=db.fills.concat(db.services).filter(e=>e.fz===f.id&&+e.km>0&&(!f.von||e.datum>=f.von)&&(!f.bis||e.datum<=f.bis)).map(e=>({d:e.datum,k:+e.km}));
+    if(f.von&&f.startKm)pts.push({d:f.von,k:+f.startKm});if(f.bis&&f.endKm)pts.push({d:f.bis,k:+f.endKm});
+    pts.sort((a,b)=>a.d.localeCompare(b.d)||a.k-b.k);
+    const inside=pts.filter(p=>{const m=p.d.slice(0,7);return m>=r.from&&m<=r.to});if(!inside.length)continue;
+    const before=pts.filter(p=>p.d.slice(0,7)<r.from);const start=before.length?before[before.length-1].k:Math.min(...inside.map(p=>p.k));
+    sum+=Math.max(0,Math.max(...inside.map(p=>p.k))-start)}
+  return sum}
+/* ---- kleine SVG-Diagramme (eine Achse, dünne Marken, Antippen zeigt Werte) ---- */
+const niceStep=v=>{const p=Math.pow(10,Math.floor(Math.log10(v))),n=v/p;return (n<=1?1:n<=2?2:n<=2.5?2.5:n<=5?5:10)*p};
+const niceMax=v=>{if(v<=0)return 1;const p=Math.pow(10,Math.floor(Math.log10(v))),n=v/p;return (n<=1?1:n<=2?2:n<=2.5?2.5:n<=5?5:10)*p};
+function barSvg(id,labels,series,fmt,opt={}){
+  const W=340,H=170,L=40,R=6,T=10,B=24,n=labels.length,cw=(W-L-R)/n,bw=Math.max(3,Math.min(22,cw*.66));
+  const tot=labels.map((_,i)=>series.reduce((a,s)=>a+(s.vals[i]||0),0));const tk=niceStep(Math.max(...tot,1)*1.04/3),nt=Math.max(1,Math.ceil(Math.max(...tot,1)*1.02/tk)),mx=tk*nt;
+  const y=v=>T+(H-T-B)*(1-v/mx);let g='';
+  for(let k=0;k<=nt;k++){const v=tk*k,yy=y(v);g+=`<line x1="${L}" x2="${W-R}" y1="${yy}" y2="${yy}" class="cg"/><text x="${L-6}" y="${yy+3.5}" class="ct" text-anchor="end">${fmt(v,true)}</text>`}
+  const step=Math.ceil(n/(opt.maxLabels||7));let bars='';
+  labels.forEach((lb,i)=>{const cx=L+cw*i+cw/2;let acc=0;const tip=`${lb.long||lb.s}: `+series.filter(s=>s.vals[i]).map(s=>(series.length>1?s.name+' ':'')+fmt(s.vals[i])).join(' · ')+(series.length>1&&tot[i]?` · gesamt ${fmt(tot[i])}`:'');
+    series.forEach((s,si)=>{const v=s.vals[i]||0;if(!v)return;const y1=y(acc+v),y0=y(acc);acc+=v;const h=Math.max(1,y0-y1-(acc<tot[i]?0:0));
+      const top=series.slice(si+1).every(t=>!(t.vals[i]>0));
+      bars+=top?`<path d="M${cx-bw/2} ${y0}V${y1+Math.min(4,h/2)}q0 -${Math.min(4,h/2)} ${Math.min(4,bw/2)} -${Math.min(4,h/2)}H${cx+bw/2-Math.min(4,bw/2)}q${Math.min(4,bw/2)} 0 ${Math.min(4,bw/2)} ${Math.min(4,h/2)}V${y0}z" style="fill:${s.c}"/>`
+        :`<rect x="${cx-bw/2}" y="${y1+1}" width="${bw}" height="${Math.max(0,h-1)}" style="fill:${s.c}"/>`});
+    bars+=`<rect x="${L+cw*i}" y="${T}" width="${cw}" height="${H-T-B}" class="hit" data-tip="${esc(tip)}"/>`;
+    if(i%step===0||i===n-1&&n<=12)bars+=`<text x="${cx}" y="${H-7}" class="ct" text-anchor="middle">${esc(lb.s)}</text>`});
+  return `<svg class="chart" id="${id}" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(opt.aria||'Balkendiagramm')}">${g}<line x1="${L}" x2="${W-R}" y1="${y(0)}" y2="${y(0)}" class="ca"/>${bars}</svg>`}
+function lineSvg(id,pts,fmt,opt={}){
+  if(pts.length<2)return '<p class="hint">Zu wenige Werte für einen Verlauf.</p>';
+  const W=340,H=160,L=40,R=8,T=10,B=24;const ys=pts.map(p=>p.v);const mn=Math.min(...ys),mxv=Math.max(...ys);const st=niceStep(((mxv-mn)||mxv*.1||1)/4);let lo=Math.max(0,Math.floor(mn/st)*st);const nt=Math.max(2,Math.ceil((mxv-lo)/st-1e-9)),hi=lo+nt*st;
+  const t=p=>Date.parse(p.d),t0=t(pts[0]),t1=t(pts[pts.length-1])||t0+1;const x=p=>L+(W-L-R)*(t1===t0?.5:(t(p)-t0)/(t1-t0)),y=v=>T+(H-T-B)*(1-(v-lo)/(hi-lo));
+  let g='';for(let k=0;k<=nt;k++){const v=lo+st*k,yy=y(v);g+=`<line x1="${L}" x2="${W-R}" y1="${yy}" y2="${yy}" class="cg"/><text x="${L-6}" y="${yy+3.5}" class="ct" text-anchor="end">${fmt(v,true)}</text>`}
+  // Jahres-/Monatsmarken auf der x-Achse
+  const yrs=new Set();let xl='';const spanD=(t1-t0)/864e5;
+  pts.forEach(p=>{const k=spanD>500?p.d.slice(0,4):p.d.slice(0,7);if(yrs.has(k))return;yrs.add(k);const xx=x(p);if(xx>W-R-14&&yrs.size>1)return;
+    xl+=`<text x="${Math.max(L+12,xx)}" y="${H-7}" class="ct" text-anchor="middle">${spanD>500?k:MON[+k.slice(5)-1].slice(0,3)}</text>`});
+  if(spanD<=500&&yrs.size>7){xl='';[...yrs].forEach((k,i,a)=>{if(i%Math.ceil(a.length/6))return;const p=pts.find(q=>q.d.startsWith(k));xl+=`<text x="${Math.max(L+12,x(p))}" y="${H-7}" class="ct" text-anchor="middle">${MON[+k.slice(5)-1].slice(0,3)}</text>`})}
+  const path=pts.map((p,i)=>(i?'L':'M')+x(p).toFixed(1)+' '+y(p.v).toFixed(1)).join('');
+  const avg=opt.avg!=null?`<line x1="${L}" x2="${W-R}" y1="${y(opt.avg)}" y2="${y(opt.avg)}" class="cavg"/><text x="${W-R}" y="${y(opt.avg)-5}" class="ct halo" text-anchor="end">Ø ${fmt(opt.avg)}</text>`:'';
+  const dots=pts.length<=60?pts.map(p=>`<circle cx="${x(p)}" cy="${y(p.v)}" r="${p.hl?4:2.6}" style="fill:${p.hl?'var(--warn)':opt.c}" class="cdot"/>`).join(''):'';
+  const hits=pts.map((p,i)=>{const x0=i?(x(pts[i-1])+x(p))/2:L,x1=i<pts.length-1?(x(p)+x(pts[i+1]))/2:W-R;return `<rect x="${x0}" y="${T}" width="${Math.max(1,x1-x0)}" height="${H-T-B}" class="hit" data-tip="${esc(fmtS(p.d)+': '+fmt(p.v)+(p.tip?' · '+p.tip:''))}" data-x="${x(p)}" data-y="${y(p.v)}"/>`}).join('');
+  return `<svg class="chart" id="${id}" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(opt.aria||'Liniendiagramm')}">${g}${avg}<path d="${path}" class="cline" style="stroke:${opt.c}"/>${dots}<circle r="5" class="cfocus" cx="0" cy="0" visibility="hidden" style="stroke:${opt.c}"/>${hits}</svg>`}
+const legend=items=>`<div class="clegend">${items.map(i=>`<span><i style="background:${i.c}"></i>${esc(i.n)}</span>`).join('')}</div>`;
+const card=(title,body,sub)=>`<div class="summary chartcard"><div class="label">${title}</div>${body}<p class="ctip hint" aria-live="polite">${sub||'Tippe auf das Diagramm für Werte.'}</p></div>`;
+const eurAx=(v,ax)=>ax?(v>=1000?nf(v/1000,v%1000?1:0)+' T€':nf(v,0)+' €'):eur(v);
+
 function viewStats(s){
-  if(allEntries().length<2)return `<section class="view">${fzChip()}<div class="list"><div class="empty">Auswertungen gibt es ab zwei Einträgen.</div></div></section>`;
-  // Kosten der letzten 12 Monate
-  const now=refDate(),months=[];for(let i=11;i>=0;i--){const d=new Date(now.getFullYear(),now.getMonth()-i,1);months.push(iso(d).slice(0,7))}
-  const mc=months.map(ym=>({ym,v:allEntries().filter(f=>f.datum.startsWith(ym)).reduce((a,f)=>a+cost(f),0)}));
-  const mx=Math.max(1,...mc.map(x=>x.v));
-  const fulls=byKm().filter(f=>s.c[f.id]&&s.c[f.id].verb!=null).slice(-10).reverse();
-  const vmx=Math.max(1,...fulls.map(f=>s.c[f.id].verb));
-  const pp=byDate().filter(f=>f.ppl).slice(0,10);
-  return `<section class="view">${fzChip()}
-    <div class="summary"><div class="label">Kosten der letzten 12 Monate${fzOf(curFz())&&fzOf(curFz()).bis?' vor der Abgabe':''}</div>
-      <div class="bars">${mc.map(x=>{const [y,m]=x.ym.split('-').map(Number);return `<div class="bar"><span class="bl">${MON[m-1].slice(0,3)} ${String(y).slice(2)}</span><span class="track"><span class="fill" style="width:${(x.v/mx*100).toFixed(1)}%"></span></span><span class="num">${x.v?eur(x.v):'–'}</span></div>`}).join('')}</div>
-      <p class="hint">Summe inkl. Wäsche und Service: ${eur(mc.reduce((a,x)=>a+x.v,0))}${s.kmYear?' · '+km(s.kmYear)+' gefahren in '+now.getFullYear():''}</p></div>
-    ${breakdownHtml()}
-    <div class="summary"><div class="label">Verbrauch je Tankung</div>
-      ${fulls.length?`<div class="bars">${fulls.map(f=>{const v=s.c[f.id].verb;return `<div class="bar"><span class="bl">${fmtS(f.datum).slice(0,6)}</span><span class="track"><span class="fill" style="width:${(v/vmx*100).toFixed(1)}%${s.avg&&v>s.avg*1.2?';background:var(--warn)':''}"></span></span><span class="num">${nf(v,1)} l</span></div>`}).join('')}</div>
-      <p class="hint">l/100 km zwischen zwei vollen Tankungen. Orange: über 20 % mehr als der Durchschnitt (${s.avg!=null?nf(s.avg,1):'–'} l).</p>`:'<p class="hint">Sobald zwei volle Tankungen da sind, steht hier der Verbrauch.</p>'}</div>
-    ${pp.length?`<div class="summary"><div class="label">Bezahlter Preis pro Liter</div>
-      <dl class="kv" style="margin:0">${pp.map(f=>`<dt>${fmtS(f.datum)}</dt><dd class="num">${nf(f.ppl,3)} €${f.station?' · '+esc(f.station):''}</dd>`).join('')}</dl></div>`:''}
+  const F=scopeF(),S=scopeS();
+  if(F.length+S.length<2)return `<section class="view">${fzChip()}<div class="list"><div class="empty">Auswertungen gibt es ab zwei Einträgen.</div></div></section>`;
+  const yrs=yearsAvail();if(!['12m','all'].includes(stv.p)&&!yrs.includes(stv.p))stv.p='12m';
+  const r=periodRange(),fP=F.filter(e=>inP(e,r)),sP=S.filter(e=>inP(e,r)),c=calcScope();
+  const fuel=fP.reduce((a,f)=>a+(+f.betrag||0),0),wash=fP.reduce((a,f)=>a+(+f.waesche||0),0)+sP.filter(v=>v.typ==='waesche').reduce((a,v)=>a+(+v.betrag||0),0),
+    serv=sP.filter(v=>v.typ!=='waesche').reduce((a,v)=>a+(+v.betrag||0),0),total=fuel+wash+serv,lit=fP.reduce((a,f)=>a+(+f.liter||0),0),kmD=kmDriven(r);
+  const verbs=fP.filter(f=>c[f.id]&&c[f.id].verb!=null);const vl=verbs.reduce((a,f)=>a+c[f.id].seit*c[f.id].verb/100,0),vk=verbs.reduce((a,f)=>a+c[f.id].seit,0);
+  const avgV=vk?vl/vk*100:null,avgP=lit?fP.filter(f=>f.liter).reduce((a,f)=>a+(+f.betrag||0),0)/lit:null;
+  // Monate oder Jahre
+  const months=monthsBetween(r.from,r.to),byYear=months.length>36;
+  const buckets=byYear?[...new Set(months.map(m=>m.slice(0,4)))]:months;
+  const bk=e=>byYear?e.datum.slice(0,4):e.datum.slice(0,7);
+  const C1='var(--c1)',C2='var(--c2)',C3='var(--c3)';
+  const sum=(arr,fn)=>buckets.map(b=>arr.filter(e=>bk(e)===b).reduce((a,e)=>a+fn(e),0));
+  const vFuel=sum(fP,f=>+f.betrag||0),vWash=buckets.map((b,i)=>sum(fP,f=>+f.waesche||0)[i]+sum(sP.filter(v=>v.typ==='waesche'),v=>+v.betrag||0)[i]),vServ=sum(sP.filter(v=>v.typ!=='waesche'),v=>+v.betrag||0);
+  const labels=buckets.map(b=>byYear?{s:b,long:b}:{s:MON[+b.slice(5)-1].slice(0,3)+(months.length>13?' '+b.slice(2,4):''),long:MON[+b.slice(5)-1]+' '+b.slice(0,4)});
+  const costSeries=[{name:'Kraftstoff',c:C1,vals:vFuel},{name:'Wäsche',c:C2,vals:vWash},{name:'Service',c:C3,vals:vServ}].filter(x=>x.vals.some(v=>v>0));
+  const litSeries=[{name:'Liter',c:C1,vals:sum(fP,f=>+f.liter||0)}];
+  // Verbrauch & Preis je Tankung
+  const vPts=verbs.slice().sort((a,b)=>a.datum.localeCompare(b.datum)).map(f=>({d:f.datum,v:c[f.id].verb,hl:avgV&&c[f.id].verb>avgV*1.2,tip:`${km(c[f.id].seit)}${stv.all?' · '+(fzOf(f.fz)||{}).name:''}`}));
+  const pPts=fP.filter(f=>f.ppl).sort((a,b)=>a.datum.localeCompare(b.datum)).map(f=>({d:f.datum,v:+f.ppl,tip:f.station||''}));
+  // Kosten nach Art
+  const parts={Kraftstoff:fuel,Autowäsche:wash};sP.filter(v=>v.typ!=='waesche').forEach(v=>{const n=(SVC[v.typ]||SVC.sonst).n;parts[n]=(parts[n]||0)+(+v.betrag||0)});
+  const pr=Object.entries(parts).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]),pmx=pr.length?pr[0][1]:1;
+  // Jahresvergleich
+  const allF=F,allS=S,ys=[...new Set(allF.map(e=>e.datum.slice(0,4)))].sort();
+  const yrow=y=>{const rr={from:y+'-01',to:y+'-12'};const f=allF.filter(e=>inP(e,rr)),sv=allS.filter(e=>inP(e,rr));const l=f.reduce((a,x)=>a+(+x.liter||0),0),fu=f.reduce((a,x)=>a+(+x.betrag||0),0);
+    const tot=fu+f.reduce((a,x)=>a+(+x.waesche||0),0)+sv.reduce((a,x)=>a+(+x.betrag||0),0),k=kmDriven(rr);const vv=f.filter(x=>c[x.id]&&c[x.id].verb!=null);
+    const a1=vv.reduce((a,x)=>a+c[x.id].seit*c[x.id].verb/100,0),a2=vv.reduce((a,x)=>a+c[x.id].seit,0);
+    return {y,n:f.length,k,l,v:a2?a1/a2*100:null,p:l?fu/l:null,tot,c100:k?tot/k*100:null}};
+  const yr=ys.map(yrow);
+  // Tankstellen & Rekorde
+  const stc={};fP.forEach(f=>{if(!f.station)return;const o=stc[f.station]||(stc[f.station]={n:0,e:0});o.n++;o.e+=fillCost(f)});
+  const tops=Object.entries(stc).sort((a,b)=>b[1].n-a[1].n||b[1].e-a[1].e).slice(0,5);
+  const byP=fP.filter(f=>f.ppl).sort((a,b)=>a.ppl-b.ppl),big=fP.slice().sort((a,b)=>(b.liter||0)-(a.liter||0))[0],vs=verbs.slice().sort((a,b)=>c[a.id].verb-c[b.id].verb);
+  const chips=[['12m','12 Monate'],...yrs.map(y=>[y,y]),['all','Alle Jahre']];
+  return `<section class="view">
+    <div class="statctl">${fzChip()}${db.fahrzeuge.length>1?`<label class="check sm"><input type="checkbox" id="stAll"${stv.all?' checked':''}> alle Fahrzeuge</label>`:''}</div>
+    <div class="pchips" role="tablist">${chips.map(([k,l])=>`<button type="button" data-p="${k}" aria-pressed="${stv.p===k}">${l}</button>`).join('')}</div>
+    <div class="summary"><div class="label">${esc(r.label)}${stv.all?' · alle Fahrzeuge':''}</div>
+      <div class="kpis">
+        <div><b class="num">${eur0(total)}</b><span>Kosten gesamt</span></div>
+        <div><b class="num">${kmD?nf(kmD,0):'–'}</b><span>km gefahren</span></div>
+        <div><b class="num">${avgV!=null?nf(avgV,2):'–'}</b><span>Ø l/100 km</span></div>
+        <div><b class="num">${avgP!=null?nf(avgP,3):'–'}</b><span>Ø €/Liter</span></div>
+        <div><b class="num">${nf(lit,0)}</b><span>Liter · ${fP.length} Tankungen</span></div>
+        <div><b class="num">${kmD?eur(total/kmD*100):'–'}</b><span>Kosten je 100 km</span></div>
+      </div></div>
+    ${card(`Kosten je ${byYear?'Jahr':'Monat'}`,costSeries.length?legend(costSeries.map(x=>({n:x.name,c:x.c})))+barSvg('chCost',labels,costSeries,eurAx,{maxLabels:months.length>13&&!byYear?4:7,aria:'Kosten je '+(byYear?'Jahr':'Monat')}):'<p class="hint">Keine Kosten im Zeitraum.</p>',
+      `Kraftstoff ${eur(fuel)} · Wäsche ${eur(wash)} · Service ${eur(serv)}`)}
+    ${card('Verbrauch je Tankung (l/100 km)',lineSvg('chVerb',vPts,(v,ax)=>nf(v,ax?1:2)+(ax?'':' l'),{c:C1,avg:avgV,aria:'Verbrauch je Tankung'}),
+      vPts.length?`Gestrichelt: Durchschnitt ${avgV!=null?nf(avgV,2):'–'} l. Orange Punkte: über 20 % mehr – fehlt da eine Quittung?`:'')}
+    ${card('Preis pro Liter',lineSvg('chPrice',pPts,(v,ax)=>nf(v,ax?2:3)+(ax?'':' €'),{c:C2,avg:avgP,aria:'Preis pro Liter'}),
+      byP.length?`Günstigster ${nf(byP[0].ppl,3)} € (${fmtS(byP[0].datum)}) · teuerster ${nf(byP[byP.length-1].ppl,3)} € (${fmtS(byP[byP.length-1].datum)})`:'')}
+    ${card(`Getankte Liter je ${byYear?'Jahr':'Monat'}`,barSvg('chLit',labels,litSeries,(v,ax)=>nf(v,0)+(ax?'':' l'),{maxLabels:months.length>13&&!byYear?4:7,aria:'Liter'}))}
+    ${pr.length?`<div class="summary"><div class="label">Kosten nach Art</div><div class="bars">${pr.map(([k,v])=>`<div class="bar"><span class="bl">${esc(k)}</span><span class="track"><span class="fill" style="width:${(v/pmx*100).toFixed(1)}%"></span></span><span class="num">${eur(v)} <small class="muted">${nf(v/total*100,0)} %</small></span></div>`).join('')}</div></div>`:''}
+    ${yr.length?`<div class="summary"><div class="label">Jahresvergleich${stv.all?' · alle Fahrzeuge':''}</div>
+      <div class="ytable"><table><thead><tr><th>Jahr</th><th>km</th><th>Liter</th><th>Ø l/100</th><th>Ø €/l</th><th>Kosten</th><th>€/100 km</th></tr></thead>
+      <tbody>${yr.slice().reverse().map(x=>`<tr${stv.p===x.y?' class="cur"':''}><td>${x.y}</td><td>${x.k?nf(x.k,0):'–'}</td><td>${nf(x.l,0)}</td><td>${x.v!=null?nf(x.v,2):'–'}</td><td>${x.p!=null?nf(x.p,3):'–'}</td><td>${eur0(x.tot)}</td><td>${x.c100!=null?nf(x.c100,2):'–'}</td></tr>`).join('')}</tbody></table></div>
+      <p class="hint">km aus allen Kilometerangaben (Tankungen, Service, km-Meldungen). Angefangene Jahre zählen nur bis zum letzten Eintrag.</p></div>`:''}
+    ${tops.length?`<div class="summary"><div class="label">Häufigste Tankstellen</div><div class="list" style="gap:6px">${tops.map(([n,o])=>`<div class="strow" style="cursor:default">${badge(db.stationen.find(s=>s.name===n),n)}<span><b>${esc(n)}</b><small>${o.n}× · ${eur(o.e)}</small></span></div>`).join('')}</div></div>`:''}
+    ${fP.length?`<div class="summary"><div class="label">Rekorde im Zeitraum</div><dl class="kv" style="margin:0">
+      ${big?`<dt>Größte Tankung</dt><dd>${nf(big.liter,2)} l · ${fmtS(big.datum)}</dd>`:''}
+      ${vs.length?`<dt>Sparsamste Fahrt</dt><dd>${nf(c[vs[0].id].verb,2)} l/100 km · ${fmtS(vs[0].datum)}</dd><dt>Höchster Verbrauch</dt><dd>${nf(c[vs[vs.length-1].id].verb,2)} l/100 km · ${fmtS(vs[vs.length-1].datum)}</dd>`:''}
+      ${kmD&&fP.length>1?`<dt>Ø Strecke je Tankung</dt><dd>${km(kmD/fP.length)}</dd>`:''}</dl></div>`:''}
   </section>`}
+function bindStats(){
+  main.querySelectorAll('[data-p]').forEach(b=>b.onclick=()=>{stv.p=b.dataset.p;buzz(4);render()});
+  const a=main.querySelector('#stAll');if(a)a.onchange=()=>{stv.all=a.checked;buzz(4);render()};
+  // Antippen: Wert unter dem Diagramm zeigen, Punkt markieren
+  main.querySelectorAll('.chartcard').forEach(cd=>{const tip=cd.querySelector('.ctip'),def=tip.innerHTML,svgEl=cd.querySelector('svg.chart');if(!svgEl)return;
+    const show=h=>{svgEl.querySelectorAll('.hit.on').forEach(x=>x.classList.remove('on'));if(!h){tip.innerHTML=def;return}h.classList.add('on');tip.textContent=h.dataset.tip;
+      const f=svgEl.querySelector('.cfocus');if(f&&h.dataset.x){f.setAttribute('cx',h.dataset.x);f.setAttribute('cy',h.dataset.y);f.setAttribute('visibility','visible')}};
+    svgEl.addEventListener('click',e=>{const h=e.target.closest('.hit');show(h);buzz(3)});
+    svgEl.addEventListener('pointermove',e=>{if(e.pointerType==='mouse'){const h=e.target.closest('.hit');if(h)show(h)}});
+    svgEl.addEventListener('pointerleave',e=>{if(e.pointerType==='mouse')show(null)})});
+  // Jahrestabelle: Antippen wählt das Jahr
+  main.querySelectorAll('.ytable tbody tr').forEach(tr=>tr.onclick=()=>{stv.p=tr.firstElementChild.textContent;buzz(4);render();window.scrollTo({top:0,behavior:motion()?'smooth':'auto'})});
+}
 
 
 /* ---------- Detail ---------- */
@@ -1305,7 +1424,7 @@ const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 let G=null,refreshing=false;
 document.addEventListener('touchstart',e=>{G=null;
   if(e.touches.length!==1||!db||tabBusy||fanOpen||root.firstElementChild)return;
-  const t=e.target;if(t.closest&&t.closest('nav.tabs,.fab,#fan,#updRoot,#toastRoot,dialog,input,select,textarea'))return;
+  const t=e.target;if(t.closest&&t.closest('nav.tabs,.fab,#fan,#updRoot,#toastRoot,dialog,input,select,textarea,.pchips,.ytable'))return;
   const p=e.touches[0];
   G={x:p.clientX,y:p.clientY,mode:null,dx:0,dy:0,v:0,lx:p.clientX,lt:performance.now(),W:appEl.clientWidth||innerWidth,idx:TABS.indexOf(tab),hit:false,edge:false};
 },{passive:true});

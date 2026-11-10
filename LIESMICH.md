@@ -1,4 +1,12 @@
-# MyTankBox – Test-App 0.11.1.1
+# MyTankBox – Test-App 0.12.0.1
+
+## Neu in 0.12 – Ausführliche Auswertung
+
+- Zeitraum wählbar: „12 Monate“, jedes einzelne Jahr oder „Alle Jahre“. Mit „alle Fahrzeuge“ werden beide Wagen zusammen ausgewertet.
+- Kennzahlen: Kosten gesamt, gefahrene km, Ø Verbrauch, Ø Literpreis, Liter und Anzahl Tankungen, Kosten je 100 km.
+- Grafiken: Kosten je Monat (bei sehr langen Zeiträumen je Jahr) aufgeteilt in Kraftstoff, Wäsche und Service · Verbrauch je Tankung mit Durchschnittslinie und markierten Ausreißern · Preis pro Liter · getankte Liter je Monat. Antippen zeigt den genauen Wert.
+- Kosten nach Art mit Prozentanteil, Jahresvergleich als Tabelle (Antippen eines Jahres wählt es aus), häufigste Tankstellen, Rekorde.
+- Gefahrene km zählen nur in deiner Nutzungszeit (ab Übernahme, bis Abgabe).
 
 ## Neu in 0.11.1
 
