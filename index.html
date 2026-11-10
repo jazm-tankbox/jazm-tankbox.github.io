@@ -814,6 +814,27 @@ a.btn.primary{color:var(--accent-ink)}
 .ghost.sm{padding:4px 10px;font-size:13px;text-decoration:none;color:var(--accent);border-color:var(--accent)}
 .pill.ok{background:var(--accent-soft);color:var(--accent)}
 .seg.two{grid-template-columns:1fr 1fr}
+.rscan{position:fixed;inset:0;z-index:2000;background:#000;color:#fff;overflow:hidden}
+.rscan video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.rsmask{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:calc(env(safe-area-inset-top) + 76px) 9% calc(env(safe-area-inset-bottom) + 182px)}
+.rsframe{position:relative;width:100%;height:100%;max-width:520px;border-radius:14px;box-shadow:0 0 0 100vmax rgba(0,0,0,.55)}
+.rsframe i{position:absolute;width:34px;height:34px;border:4px solid #fff;border-radius:6px}
+.rsframe i:nth-child(1){left:-2px;top:-2px;border-right:0;border-bottom:0}
+.rsframe i:nth-child(2){right:-2px;top:-2px;border-left:0;border-bottom:0}
+.rsframe i:nth-child(3){left:-2px;bottom:-2px;border-right:0;border-top:0}
+.rsframe i:nth-child(4){right:-2px;bottom:-2px;border-left:0;border-top:0}
+.rstop{position:absolute;left:0;right:0;top:0;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:calc(env(safe-area-inset-top) + 14px) 14px 0}
+.rstxt{font-weight:700;font-size:16px;text-align:center;text-shadow:0 1px 4px rgba(0,0,0,.6)}
+.rsbtn{width:46px;height:46px;flex:none;border-radius:50%;border:0;background:rgba(0,0,0,.45);color:#fff;display:grid;place-items:center;cursor:pointer}
+.rsbtn svg{width:22px;height:22px}
+.rsbtn[hidden]{visibility:hidden;display:grid}
+.rsbtn.on{background:#fff;color:#111}
+.rsbot{position:absolute;left:0;right:0;bottom:0;display:flex;flex-direction:column;align-items:center;gap:14px;padding:0 24px calc(env(safe-area-inset-bottom) + 24px)}
+.rshint{font-size:13px;text-align:center;opacity:.85;max-width:340px;text-shadow:0 1px 4px rgba(0,0,0,.6)}
+.rsshot{width:78px;height:78px;border-radius:50%;border:5px solid #fff;background:transparent;padding:5px;cursor:pointer}
+.rsshot span{display:block;width:100%;height:100%;border-radius:50%;background:#fff;transition:transform .12s}
+.rsshot:active span{transform:scale(.88)}
+.rsflash{position:absolute;inset:0;background:#fff;opacity:0;pointer-events:none}
 .mapfull{position:relative}
 .mepin{background:none;border:0}
 .mepin .medot{position:absolute;left:11px;top:11px;width:22px;height:22px;border-radius:50%;background:#111827;border:4px solid #fff;box-sizing:border-box;box-shadow:0 1px 6px rgba(0,0,0,.45)}
@@ -857,7 +878,7 @@ a.btn.primary{color:var(--accent-ink)}
 
 <div class="fan" id="fan" hidden><div class="fs"></div><div class="fi">
   <button type="button" data-neu="service" style="--n:2"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L4 17l3 3 5.3-5.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.4-.6-.6-2.4z"/></svg>Service eintragen</button>
-  <button type="button" data-neu="foto" style="--n:1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13.5" r="3.5"/></svg>Quittung fotografieren</button>
+  <button type="button" data-neu="foto" style="--n:1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13.5" r="3.5"/></svg>Quittung scannen</button>
   <button type="button" data-neu="hand" style="--n:0"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16z"/><path d="M13.5 6.5l4 4"/></svg>Ohne Foto eintragen</button>
 </div></div>
 

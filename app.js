@@ -1,6 +1,6 @@
 (function(){
 'use strict';
-const APP_VERSION='0.9.1.1';
+const APP_VERSION='0.10.0.1';
 /* Eigener Speicher je Adresse: die Live-App unter / behält ihre Namen, eine Test-App unter /test/ bekommt eigene */
 const BASE=location.pathname.replace(/[^/]*$/,'');
 const NS=BASE==='/'?'':BASE.replace(/^\/|\/$/g,'').replace(/[^a-z0-9]+/gi,'-').toLowerCase()+'-';
@@ -291,10 +291,11 @@ function closeSheet(anim){
   back();setTimeout(()=>{if(tok===sheetTok)root.innerHTML=''},280);
 }
 addEventListener('popstate',()=>{if(ignorePop){ignorePop=false;return}histPushed=false;
+  if(scanOpen){scanOpen();try{history.pushState({tankbox:1},'');histPushed=true}catch(e){}return}
   const d=document.getElementById('dsdlg');if(d&&d.open){d.close();return}
   if(fanOpen){setFan(false);return}
   if(root.firstElementChild)closeSheet()});
-document.addEventListener('keydown',e=>{if(e.key!=='Escape')return;if(fanOpen)setFan(false);else if(root.firstElementChild)closeSheet()});
+document.addEventListener('keydown',e=>{if(e.key!=='Escape')return;if(scanOpen){scanOpen();return}if(fanOpen)setFan(false);else if(root.firstElementChild)closeSheet()});
 const head=t=>`<div class="sheethead"><h2>${t}</h2><button type="button" class="icobtn" data-close aria-label="Schließen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>`;
 
 /* Kleines Fenster für Eingaben (GitHub einrichten, App-Update) – wie in den anderen Boxen */
@@ -844,6 +845,60 @@ async function drawMap(el,st){
   setTimeout(()=>map.invalidateSize(),250);
   return map}
 
+/* ---------- Eigener Quittungs-Scanner (Live-Kamera mit Rahmen, wie in Banking- oder Krankenkassen-Apps) ----------
+   Liefert ein Foto (Blob), auf den Rahmen zugeschnitten. Ohne Kamerazugriff: null → System-Kamera als Ausweg. */
+let scanOpen=null;
+function scanSupported(){return !!(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia)}
+function openScanner(){
+  return new Promise(async resolve=>{
+    let stream=null,track=null,torch=false,done=false;
+    const el=document.createElement('div');el.className='rscan';el.setAttribute('role','dialog');el.setAttribute('aria-label','Quittung scannen');
+    el.innerHTML=`<video playsinline muted autoplay></video>
+      <div class="rsmask"><div class="rsframe"><i></i><i></i><i></i><i></i></div></div>
+      <div class="rstop"><button type="button" class="rsbtn" data-x aria-label="Abbrechen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+        <span class="rstxt">Quittung in den Rahmen legen</span>
+        <button type="button" class="rsbtn" data-torch aria-label="Licht" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L4 14h7l-1 8 9-12h-7z"/></svg></button></div>
+      <div class="rsbot"><span class="rshint">Flach hinlegen, von oben, ohne Schatten. Lange Quittungen dürfen über den Rahmen hinausgehen.</span>
+        <button type="button" class="rsshot" data-shot aria-label="Foto aufnehmen"><span></span></button></div>
+      <div class="rsflash"></div>`;
+    document.body.appendChild(el);document.body.style.overflow='hidden';
+    const video=el.querySelector('video'),frame=el.querySelector('.rsframe');
+    const stop=()=>{if(stream)stream.getTracks().forEach(t=>t.stop());stream=null};
+    const finish=blob=>{if(done)return;done=true;stop();scanOpen=null;
+      if(motion())el.animate([{opacity:1},{opacity:0}],{duration:180}).onfinish=()=>el.remove();else el.remove();
+      if(!root.firstElementChild)document.body.style.overflow='';resolve(blob)};
+    scanOpen=()=>finish(undefined);
+    el.querySelector('[data-x]').onclick=()=>finish(undefined);
+    try{
+      stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:'environment'},width:{ideal:3840},height:{ideal:2160}}});
+    }catch(e){finish(null);return}
+    if(done){stop();return}
+    video.srcObject=stream;track=stream.getVideoTracks()[0];
+    try{await video.play()}catch(e){}
+    // Dauerfokus und Taschenlampe, wo das Gerät es kann
+    try{const cap=track.getCapabilities?track.getCapabilities():{};
+      const adv=[];if(cap.focusMode&&cap.focusMode.includes('continuous'))adv.push({focusMode:'continuous'});
+      if(adv.length)track.applyConstraints({advanced:adv}).catch(()=>{});
+      if(cap.torch){const tb=el.querySelector('[data-torch]');tb.hidden=false;
+        tb.onclick=()=>{torch=!torch;track.applyConstraints({advanced:[{torch}]}).catch(()=>{});tb.classList.toggle('on',torch);buzz(4)}}}catch(e){}
+    el.querySelector('[data-shot]').onclick=async()=>{
+      if(done||!video.videoWidth)return;buzz(12);
+      const fl=el.querySelector('.rsflash');if(motion())fl.animate([{opacity:.85},{opacity:0}],{duration:260});
+      // Vollauflösung über ImageCapture, sonst Standbild aus dem Video
+      let bmp=null;
+      try{if(window.ImageCapture){const ic=new ImageCapture(track);const b=await ic.takePhoto();bmp=await createImageBitmap(b)}}catch(e){bmp=null}
+      if(!bmp){try{bmp=await createImageBitmap(video)}catch(e){}}
+      if(!bmp){toast('Foto konnte nicht aufgenommen werden.');return}
+      // Rahmen (Bildschirm) → Bildkoordinaten; das Video füllt den Schirm „cover“
+      const vw=el.clientWidth,vh=el.clientHeight,iw=bmp.width,ih=bmp.height,sc=Math.max(vw/iw,vh/ih),ox=(vw-iw*sc)/2,oy=(vh-ih*sc)/2;
+      const r=frame.getBoundingClientRect(),m=.06; // etwas Rand dazugeben
+      let x=(r.left-ox)/sc,y=(r.top-oy)/sc,w=r.width/sc,h=r.height/sc;
+      x-=w*m;y-=h*m;w*=1+2*m;h*=1+2*m;x=Math.max(0,x);y=Math.max(0,y);w=Math.min(iw-x,w);h=Math.min(ih-y,h);
+      const c=document.createElement('canvas');c.width=Math.round(w);c.height=Math.round(h);c.getContext('2d').drawImage(bmp,x,y,w,h,0,0,c.width,c.height);
+      c.toBlob(b=>finish(b),'image/jpeg',.92)};
+  });
+}
+
 /* ---------- Formular ---------- */
 async function shrink(file){
   const bmp=await createImageBitmap(file).catch(()=>null);
@@ -863,7 +918,7 @@ function openForm(id,withPhoto){
     <form id="ff" novalidate>
       <div class="field"><span>Quittung</span>
         <div class="fotobox" id="fbox">${f.foto?'<span class="muted">Foto vorhanden</span>':''}</div>
-        <div class="actions"><label class="btn${old||f.foto?'':' primary'}">${svg('cam','bi')} ${f.foto?'Neues Foto':'Foto aufnehmen'}<input id="fcam" type="file" accept="image/*" capture="environment" hidden></label>
+        <div class="actions"><button type="button" class="btn${old||f.foto?'':' primary'}" id="fscan">${svg('cam','bi')} ${f.foto?'Neu scannen':'Quittung scannen'}</button><input id="fcam" type="file" accept="image/*" capture="environment" hidden>
           <label class="btn">Aus Galerie<input id="fgal" type="file" accept="image/*" hidden></label>
           <button type="button" class="btn" id="frm"${f.foto?'':' hidden'}>Foto entfernen</button></div>
         <p class="hint" id="focr">Nach dem Foto liest die App die Quittung automatisch aus, inklusive Autowäsche und Kilometerstand.</p></div>
@@ -893,9 +948,15 @@ function openForm(id,withPhoto){
       if(b){previewUrl=URL.createObjectURL(b);box.innerHTML=`<img class="photo" src="${previewUrl}" alt="Quittung">`;rm.hidden=false}
       else{box.innerHTML='';rm.hidden=true}};
     showFoto();
-    const pick=async inp=>{const file=inp.files[0];inp.value='';if(!file)return;box.innerHTML='<span class="muted">Foto wird vorbereitet …</span>';
+    const useFile=async file=>{if(!file)return;box.innerHTML='<span class="muted">Foto wird vorbereitet …</span>';
       const b=await shrink(file);if(!b){toast('Dieses Bild lässt sich nicht lesen.');showFoto();return}newFoto=b;fotoGone=false;await showFoto();buzz(6);
       ocr(file)};
+    const pick=inp=>{const file=inp.files[0];inp.value='';useFile(file)};
+    const scan=async()=>{if(!scanSupported()){s.querySelector('#fcam').click();return}
+      const b=await openScanner();
+      if(b===null){toast('Kein Kamerazugriff – die Kamera-App wird geöffnet.');s.querySelector('#fcam').click();return}
+      if(b&&fm.isConnected)useFile(b)};
+    s.querySelector('#fscan').onclick=scan;
     /* Quittung auslesen: füllt nur Felder, die du noch nicht selbst geändert hast */
     const touched=new Set(),focr=s.querySelector('#focr');
     fm.addEventListener('input',e=>{if(e.isTrusted&&e.target.name)touched.add(e.target.name)});
@@ -940,7 +1001,7 @@ function openForm(id,withPhoto){
     const live=()=>{const o=read();const so=fm.querySelector('#fsum');if(so)so.textContent=o.betrag>0||o.waesche>0?eur((o.betrag||0)+(o.waesche||0)):'–';const ph=fm.elements.ppl;if(!ph.value)ph.placeholder=o.liter>0&&o.betrag>0?nf(o.betrag/o.liter,3)+' (berechnet)':'wird berechnet';
       const w=checks(o,old&&old.id);warn.hidden=!w.length;warn.innerHTML=w.map(esc).join('<br>')};
     fm.addEventListener('input',live);fm.addEventListener('change',live);if(old)live();
-    if(withPhoto&&!old)setTimeout(()=>s.querySelector('#fcam').click(),motion()?450:50);
+    if(withPhoto&&!old)setTimeout(scan,motion()?450:50);
     fm.onsubmit=async e=>{e.preventDefault();const o=read();
       const bad=[];if(!/^\d{4}-\d{2}-\d{2}$/.test(o.datum))bad.push('datum');if(!(o.km>0))bad.push('km');if(!(o.liter>0))bad.push('liter');if(!(o.betrag>0))bad.push('betrag');
       fm.querySelectorAll('.field.no').forEach(x=>x.classList.remove('no'));

@@ -1,4 +1,10 @@
-# MyTankBox – Test-App 0.9.1.1
+# MyTankBox – Test-App 0.10.0.1
+
+## Neu in 0.10 – Eigener Quittungs-Scanner
+
+- „Quittung scannen“ öffnet direkt in der App ein Live-Kamerabild mit Rahmen (statt der Kamera-App): großer Auslöser, Taschenlampe (wenn das Handy es kann), Dauerfokus. Das Foto wird auf den Rahmen zugeschnitten und sofort ausgelesen.
+- Beim ersten Mal fragt Android nach dem Kamerazugriff. Ohne Zugriff öffnet sich wie bisher die Kamera-App. „Aus Galerie“ bleibt.
+- Zurück-Taste oder ✕ schließt den Scanner.
 
 ## Neu in 0.9.1
 
