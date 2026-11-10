@@ -1,6 +1,6 @@
 (function(){
 'use strict';
-const APP_VERSION='0.12.0.1';
+const APP_VERSION='0.13.0.1';
 /* Eigener Speicher je Adresse: die Live-App unter / behält ihre Namen, eine Test-App unter /test/ bekommt eigene */
 const BASE=location.pathname.replace(/[^/]*$/,'');
 const NS=BASE==='/'?'':BASE.replace(/^\/|\/$/g,'').replace(/[^a-z0-9]+/gi,'-').toLowerCase()+'-';
@@ -344,6 +344,8 @@ function render(){
   if(tab==='home')main.innerHTML=viewHome(s);else if(tab==='liste')main.innerHTML=viewList(s);else{main.innerHTML=viewStats(s);bindStats()}
   main.querySelectorAll('[data-fill]').forEach(b=>b.onclick=()=>openDetail(b.dataset.fill));
   main.querySelectorAll('[data-fz]').forEach(b=>b.onclick=()=>openFz());
+  main.querySelectorAll('[data-duet]').forEach(b=>b.onclick=()=>{buzz(4);openDueTile(b.dataset.duet)});
+  const ivb=main.querySelector('[data-iv]');if(ivb)ivb.onclick=()=>editIv();
   main.querySelectorAll('[data-svc]').forEach(b=>b.onclick=()=>openSvcDetail(b.dataset.svc));
   main.querySelectorAll('[data-due]').forEach(b=>b.onclick=()=>openSvcForm(null,b.dataset.due));
   const rm=main.querySelector('[data-bk]');if(rm)rm.onclick=()=>openMenu('gh');
@@ -361,7 +363,7 @@ function viewHome(s){
     <div class="summary"><div><div class="label">Willkommen</div><p style="margin:6px 0 0">Erfasse jede Tankung des Dienstwagens mit Quittungsfoto. Die MyTankBox rechnet Verbrauch und Kosten aus.</p></div>
     <div class="actions"><button type="button" class="btn primary" data-new="foto">Erste Tankung erfassen</button></div></div>
     ${ghCfg()?'':`<p class="hint">Neues Handy? Unter <b>Daten</b> → Datensicherung → „GitHub einrichten“ holst du deine Tankungen aus GitHub zurück.</p>`}</section>`;
-  return `<section class="view">${DS.remindHtml(bkInfo(),'data-bk')}${fzChip()}
+  return `<section class="view">${DS.remindHtml(bkInfo(),'data-bk')}${fzChip()}${dueTilesHtml()}
     <div class="summary">
       <div><div class="label">Durchschnittsverbrauch</div><div class="bigcost"><span class="num"${s.avg!=null?` data-count="avg" data-v="${s.avg}" data-f="l1"`:''}>${s.avg!=null?nf(s.avg,1):'–'}</span><small>l/100 km${s.avg==null?' · ab zwei vollen Tankungen':''}</small></div></div>
       <div class="facts">
@@ -589,22 +591,77 @@ function dueHtml(){
   const last=t=>svcByDate().find(v=>v.typ===t);
   const kmNow=(()=>{const a=allEntries().map(e=>+e.km||0);return a.length?Math.max(...a):null})();
   const items=[];
-  const tv=last('tuev');
-  if(tv&&tv.next){const [y,m]=tv.next.split('-').map(Number);const end=new Date(y,m,0);const d=Math.round((end-T())/864e5);
-    items.push({t:'tuev',l:'TÜV / HU',v:ymText(tv.next),lvl:d<0?'crit':d<=45?'warn':'',s:d<0?'überfällig':d<=45?'in '+d+' Tagen':''})}
-  const ins=last('inspektion');
-  if(ins&&(ins.next||ins.nextKm)){let lvl='',sub=[];
-    if(ins.next){const d=daysAgo(ins.next)*-1;if(d<0)lvl='crit';else if(d<=30)lvl='warn';if(d<=30)sub.push(d<0?'Datum überschritten':'in '+d+' Tagen')}
-    if(ins.nextKm&&kmNow!=null){const r=ins.nextKm-kmNow;if(r<0)lvl='crit';else if(r<=1500&&lvl!=='crit')lvl='warn';sub.push(r<0?km(-r)+' drüber':'noch '+km(r))}
-    items.push({t:'inspektion',l:'Inspektion',v:nextText(ins),lvl,s:sub.join(' · ')})}
   const rf=last('reifen');
   if(rf&&rf.reifen&&rf.reifen!=='Neue Reifen'){const m=new Date().getMonth()+1;const sommer=rf.reifen.startsWith('Sommer'),winter=rf.reifen.startsWith('Winter');
     const hint=sommer&&(m>=10||m<=3)?'Zeit für Winterreifen?':winter&&m>=4&&m<=9?'Zeit für Sommerreifen?':'';
     items.push({t:'reifen',l:rf.reifen.replace(' drauf',''),v:'seit '+fmtS(rf.datum),lvl:hint?'warn':'',s:hint})}
   if(!items.length)return '';
-  return `<div><div class="sechead"><h2>Fahrzeug</h2></div><div class="list" style="margin-top:10px">${items.map((x,i)=>`<button type="button" class="row due${x.lvl?' '+x.lvl:''}" data-due="${x.t}" style="--j:${i}">
+  return `<div><div class="sechead"><h2>Reifen</h2></div><div class="list" style="margin-top:10px">${items.map((x,i)=>`<button type="button" class="row due${x.lvl?' '+x.lvl:''}" data-due="${x.t}" style="--j:${i}">
     <span class="date sv">${svcIco(x.t)}</span><span class="main"><span class="t">${esc(x.l)}</span><span class="s">${x.t==='reifen'?esc(x.v):'fällig '+esc(x.v)}</span>
     ${x.s?`<span class="s"><span class="pill${x.lvl?' '+x.lvl:''}">${esc(x.s)}</span></span>`:''}</span></button>`).join('')}</div></div>`}
+
+/* ---------- TÜV & Inspektion: Fälligkeit aus eigenem Intervall je Fahrzeug ----------
+   Ein beim Eintrag von Hand gesetzter Termin (nextSet) hat Vorrang vor dem Intervall. */
+const IV_DEF={tuevM:24,inspM:12,inspKm:0};
+const iv=f=>Object.assign({},IV_DEF,(f&&f.iv)||{});
+const addM=(isoD,m)=>{const d=parse(isoD);return new Date(d.getFullYear(),d.getMonth()+m,d.getDate())};
+const kmNowCur=()=>{const a=allEntries().map(e=>+e.km||0);return a.length?Math.max(...a):null};
+function dueInfo(){
+  const f=fzOf(curFz()),I=iv(f),last=t=>svcByDate().find(v=>v.typ===t),now=T(),kn=kmNowCur(),out={};
+  // TÜV: gilt bis Ende des Fälligkeitsmonats
+  const tv=last('tuev');
+  if(tv){let due;if(tv.next&&tv.nextSet){const [y,m]=tv.next.split('-').map(Number);due=new Date(y,m,0)}else{const a=addM(tv.datum,I.tuevM);due=new Date(a.getFullYear(),a.getMonth()+1,0)}
+    const days=Math.round((due-now)/864e5),span=Math.max(1,(due-parse(tv.datum))/864e5);
+    out.tuev={last:tv,due,days,frac:Math.min(1,Math.max(0,1-days/span)),lvl:days<0?'crit':days<=60?'warn':'ok',
+      main:ymText(iso(due).slice(0,7)),sub:days<0?`seit ${-days} Tagen überfällig`:days<=60?`noch ${days} Tage`:`noch ${Math.round(days/30.4)} Monate`}}
+  else out.tuev=null;
+  // Inspektion: was zuerst kommt – Datum oder km
+  const ins=last('inspektion');
+  if(ins){let due=null,dueKm=null;
+    if(ins.nextSet&&ins.next)due=parse(ins.next);else if(I.inspM)due=addM(ins.datum,I.inspM);
+    if(ins.nextSet&&ins.nextKm)dueKm=+ins.nextKm;else if(I.inspKm&&ins.km)dueKm=+ins.km+I.inspKm;
+    const days=due?Math.round((due-now)/864e5):null,rest=dueKm&&kn!=null?dueKm-kn:null;
+    const fd=due?Math.min(1,Math.max(0,1-days/Math.max(1,(due-parse(ins.datum))/864e5))):0,fk=rest!=null&&ins.km?Math.min(1,Math.max(0,1-rest/Math.max(1,dueKm-ins.km))):0;
+    const crit=(days!=null&&days<0)||(rest!=null&&rest<0),warn=(days!=null&&days<=45)||(rest!=null&&rest<=2000);
+    const parts=[];if(due)parts.push(days<0?`${-days} Tage drüber`:days<=45?`noch ${days} Tage`:`noch ${Math.round(days/30.4)} Monate`);if(rest!=null)parts.push(rest<0?`${km(-rest)} drüber`:`noch ${km(rest)}`);
+    out.insp={last:ins,due,dueKm,days,rest,frac:Math.max(fd,fk),lvl:crit?'crit':warn?'warn':'ok',
+      main:due?fmtD(due):dueKm?km(dueKm):'Intervall festlegen',alt:due&&dueKm?'oder bei '+km(dueKm):'',sub:parts.join(' · ')||'kein Intervall gesetzt'}}
+  else out.insp=null;
+  return out}
+const LVL={ok:{t:'in Ordnung',ic:'<path d="M5 12.5l4.5 4.5L19 7.5"/>'},warn:{t:'bald fällig',ic:'<path d="M12 7v6M12 16.5v.5"/>'},crit:{t:'überfällig',ic:'<path d="M12 6.5v7M12 16.5v.5"/>'}};
+function dueTilesHtml(){
+  const f=fzOf(curFz());if(!f||f.bis)return '';
+  const d=dueInfo(),I=iv(f);
+  const tile=(k,title,x,empty)=>x?`<button type="button" class="duetile ${x.lvl}" data-duet="${k}">
+      <span class="dt-head">${svcIco(k)}<b>${title}</b><span class="dt-st" title="${LVL[x.lvl].t}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">${LVL[x.lvl].ic}</svg></span></span>
+      <span class="dt-main">${esc(x.main)}</span>${x.alt?`<span class="dt-alt">${esc(x.alt)}</span>`:''}<span class="dt-sub">${esc(x.sub)}</span>
+      <span class="dt-bar"><i style="width:${(x.frac*100).toFixed(0)}%"></i></span>
+      <span class="dt-lvl">${LVL[x.lvl].t}</span></button>`
+    :`<button type="button" class="duetile none" data-duet="${k}"><span class="dt-head">${svcIco(k)}<b>${title}</b></span><span class="dt-sub">${empty}</span><span class="dt-lvl">+ eintragen</span></button>`;
+  return `<div class="duegrid">${tile('tuev','TÜV / HU',d.tuev,'Noch kein TÜV eingetragen')}${tile('inspektion','Inspektion',d.insp,'Noch keine Inspektion eingetragen')}</div>
+    <button type="button" class="ivlink" data-iv>Intervalle: TÜV alle ${I.tuevM} Monate · Inspektion ${[I.inspM?'alle '+I.inspM+' Monate':'',I.inspKm?'alle '+nf(I.inspKm,0)+' km':''].filter(Boolean).join(' oder ')||'ohne Intervall'} · ändern</button>`}
+function openDueTile(k){
+  const d=dueInfo()[k==='tuev'?'tuev':'insp'];
+  if(!d){openSvcForm(null,k);return}
+  const last=d.last;
+  openSheet(head(k==='tuev'?'TÜV / HU':'Inspektion')+`
+    <div class="hero h-${d.lvl==='ok'?'ok':d.lvl==='warn'?'warn':'crit'}"><span class="hl">Nächste Fälligkeit</span><b>${esc(d.main)}${d.alt?' '+esc(d.alt):''}</b><span class="hs">${esc(d.sub)} · ${LVL[d.lvl].t}</span></div>
+    <dl class="kv"><dt>Zuletzt</dt><dd>${fmtS(last.datum)}${last.km?' · '+km(last.km):''}</dd>
+      <dt>Berechnet aus</dt><dd>${last.nextSet?'von dir eingetragenem Termin':'Intervall des Fahrzeugs'}</dd>
+      ${last.betrag?`<dt>Kosten</dt><dd>${eur(last.betrag)}</dd>`:''}</dl>
+    <div class="actions two"><button type="button" class="btn primary" id="dNew">${k==='tuev'?'Neuen TÜV':'Neue Inspektion'} eintragen</button><button type="button" class="btn" id="dIv">Intervall ändern</button></div>
+    <div class="actions"><button type="button" class="btn" id="dLast">Letzten Eintrag ansehen</button></div>`,
+  s=>{s.querySelector('#dNew').onclick=()=>openSvcForm(null,k);s.querySelector('#dIv').onclick=()=>editIv();s.querySelector('#dLast').onclick=()=>openSvcDetail(last.id)});
+}
+function editIv(){const f=fzOf(curFz());if(!f)return;const I=iv(f);
+  dsForm('Intervalle für '+f.name,[{k:'tuevM',l:'TÜV / HU alle … Monate',v:String(I.tuevM)},{k:'inspM',l:'Inspektion alle … Monate (leer = aus)',v:I.inspM?String(I.inspM):''},{k:'inspKm',l:'Inspektion alle … km (leer = aus)',v:I.inspKm?String(I.inspKm):''}],
+    async(v,fail)=>{const n=x=>{const t=String(x).replace(/\./g,'').trim();return t?parseInt(t,10):0};
+      const o={tuevM:n(v.tuevM),inspM:n(v.inspM),inspKm:n(v.inspKm)};
+      if(!(o.tuevM>=1&&o.tuevM<=60))return fail('TÜV-Intervall bitte zwischen 1 und 60 Monaten.');
+      if(o.inspM<0||o.inspM>60||o.inspKm<0||o.inspKm>200000)return fail('Bitte gültige Werte eintragen.');
+      f.iv=o;await save();if(root.firstElementChild)closeSheet(false);render();toast('Intervalle gespeichert.')},
+    {ok:'Speichern',html:'<p class="ds-dlg-intro">Die nächste Fälligkeit wird aus dem letzten Eintrag plus Intervall berechnet. Bei der Inspektion zählt, was zuerst erreicht ist. Typisch: TÜV bei Neuwagen nach 36, danach alle 24 Monate; Inspektion laut Serviceheft (z. B. alle 12 Monate oder 30.000 km).</p>'});
+}
 
 /* Kosten nach Art im laufenden Jahr */
 function breakdownHtml(){
@@ -656,9 +713,10 @@ function openSvcForm(id,typ){
         <label class="field"><span>Kosten (€)</span><input name="betrag" inputmode="decimal" placeholder="leer = ohne Kosten" value="${nv('betrag',2)}"></label></div>
       <label class="field"><span>Werkstatt / Ort</span><input name="ort" maxlength="80" value="${esc(v.ort||'')}" list="ortlist" placeholder="optional"></label>
       <datalist id="ortlist">${[...new Set(svcByDate().map(x=>x.ort).filter(Boolean))].slice(0,12).map(x=>`<option value="${esc(x)}">`).join('')}</datalist>
-      <label class="field" data-f="nextm"><span>Nächster TÜV (Monat)</span><input name="nextm" type="month" value="${v.typ==='tuev'?esc(v.next||''):''}"></label>
-      <div class="grid2" data-f="nexti"><label class="field"><span>Nächste Inspektion am</span><input name="nextd" type="date" value="${v.typ==='inspektion'?esc(v.next||''):''}"></label>
-        <label class="field"><span>oder bei km</span><input name="nextkm" inputmode="numeric" placeholder="optional" value="${v.nextKm||''}"></label></div>
+      <label class="field" data-f="nextm"><span>Nächster TÜV (Monat) – nur falls abweichend vom Intervall</span><input name="nextm" type="month" value="${v.typ==='tuev'&&v.nextSet?esc(v.next||''):''}"></label>
+      <div class="grid2" data-f="nexti"><label class="field"><span>Abweichend: nächste am</span><input name="nextd" type="date" value="${v.typ==='inspektion'&&v.nextSet?esc(v.next||''):''}"></label>
+        <label class="field"><span>oder bei km</span><input name="nextkm" inputmode="numeric" placeholder="optional" value="${v.typ==='inspektion'&&v.nextSet?(v.nextKm||''):''}"></label></div>
+      <p class="hint" data-f="ivh">Ohne Angabe rechnet die App mit dem Intervall des Fahrzeugs (Übersicht → „Intervalle … ändern“).</p>
       <label class="field"><span>Notiz (optional)</span><input name="notiz" maxlength="200" value="${esc(v.notiz||'')}" placeholder=""></label>
       <div class="field"><span>Beleg / Foto (optional)</span>
         <div class="fotobox" id="sbox"></div>
@@ -672,7 +730,7 @@ function openSvcForm(id,typ){
     s.querySelector('[data-close]').onclick=()=>closeSheet();
     const NOTE={adblue:'',reifen:'',inspektion:'z. B. Ölwechsel, Bremsen',tuev:'z. B. ohne Mängel',panne:'Was ist passiert? Abschleppdienst?',sonst:''};
     const vis=()=>{const t=fm.elements.typ.value;
-      const show={titel:t==='sonst'||t==='panne',menge:t==='adblue',reifen:t==='reifen',nextm:t==='tuev',nexti:t==='inspektion'};
+      const show={titel:t==='sonst'||t==='panne',menge:t==='adblue',reifen:t==='reifen',nextm:t==='tuev',nexti:t==='inspektion',ivh:t==='tuev'||t==='inspektion'};
       fm.querySelectorAll('[data-f]').forEach(x=>{x.hidden=!show[x.dataset.f]});
       fm.querySelector('[data-f=titel] span').textContent=t==='panne'?'Was war los?':'Was?';
       fm.elements.notiz.placeholder=NOTE[t]||'';
@@ -680,8 +738,8 @@ function openSvcForm(id,typ){
       // TÜV: Vorschlag in 2 Jahren
       sugg();
     };
-    let autoNext=!fm.elements.nextm.value;
-    const sugg=()=>{const el=fm.elements;if(el.typ.value!=='tuev'||!autoNext||!el.datum.value)return;const d=parse(el.datum.value);el.nextm.value=(d.getFullYear()+2)+'-'+String(d.getMonth()+1).padStart(2,'0')};
+    let autoNext=!(old&&old.typ==='tuev'&&old.nextSet);
+    const sugg=()=>{const el=fm.elements;if(el.typ.value!=='tuev'||!autoNext||!el.datum.value)return;const a=addM(el.datum.value,iv(fzOf(curFz())).tuevM);el.nextm.value=iso(a).slice(0,7)};
     fm.elements.nextm.addEventListener('input',()=>{autoNext=false});fm.elements.datum.addEventListener('change',sugg);fm.elements.datum.addEventListener('input',sugg);
     fm.addEventListener('change',e=>{if(e.target.name==='typ'){vis();buzz(4)}});vis();
     const showFoto=async()=>{if(previewUrl)URL.revokeObjectURL(previewUrl);previewUrl=null;
@@ -700,8 +758,8 @@ function openSvcForm(id,typ){
       if(t==='sonst'||t==='panne')o.titel=el.titel.value.trim();
       if(t==='adblue')o.menge=num(el.menge.value);
       if(t==='reifen')o.reifen=el.reifen.value;
-      if(t==='tuev')o.next=el.nextm.value||null;
-      if(t==='inspektion'){o.next=el.nextd.value||null;o.nextKm=Math.round(num(el.nextkm.value))||null}
+      if(t==='tuev'){o.next=!autoNext&&el.nextm.value?el.nextm.value:null;o.nextSet=!!o.next||undefined}
+      if(t==='inspektion'){o.next=el.nextd.value||null;o.nextKm=Math.round(num(el.nextkm.value))||null;o.nextSet=!!(o.next||o.nextKm)||undefined}
       if(o.km&&kmNow&&o.km>kmNow+5000&&!fm.dataset.ok){fm.dataset.ok='1';toast('Der Kilometerstand liegt weit über dem letzten. Nochmal „Speichern“ tippen, wenn er stimmt.');buzz([20,40,20]);return}
       const rec=Object.assign(old?{id:old.id,created:old.created,foto:old.foto,fz:old.fz}:{id:uid(),created:Date.now(),fz:curFz()},o,{updated:Date.now()});
       Object.keys(rec).forEach(k=>{if(rec[k]==null||rec[k]===''||(typeof rec[k]==='number'&&Number.isNaN(rec[k])))delete rec[k]});

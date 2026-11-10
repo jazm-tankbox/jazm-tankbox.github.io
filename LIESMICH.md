@@ -1,4 +1,12 @@
-# MyTankBox – Test-App 0.12.0.1
+# MyTankBox – Test-App 0.13.0.1
+
+## Neu in 0.13 – TÜV und Inspektion auf einen Blick
+
+- Zwei Kacheln oben in der Übersicht: TÜV / HU und Inspektion, jeweils mit Fälligkeit, Restzeit bzw. Rest-km, Fortschrittsbalken und Status mit Symbol und Text (in Ordnung · bald fällig · überfällig). Bald fällig: TÜV ab 60 Tagen, Inspektion ab 45 Tagen oder 2.000 km.
+- Intervalle je Fahrzeug selbst festlegen („Intervalle … ändern“ unter den Kacheln): TÜV alle … Monate (Standard 24), Inspektion alle … Monate und/oder alle … km – es zählt, was zuerst erreicht ist.
+- Die Fälligkeit wird aus dem letzten Eintrag plus Intervall berechnet. Ein beim Eintrag von Hand gesetzter abweichender Termin hat Vorrang.
+- Antippen einer Kachel: Details, „Neuen TÜV / Neue Inspektion eintragen“, Intervall ändern. Ohne Eintrag führt die Kachel direkt zum Eintragen.
+- Abgegebene Wagen zeigen keine Kacheln.
 
 ## Neu in 0.12 – Ausführliche Auswertung
 
