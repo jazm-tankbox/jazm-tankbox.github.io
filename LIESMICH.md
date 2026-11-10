@@ -1,4 +1,12 @@
-# MyTankBox – Test-App 0.10.0.1
+# MyTankBox – Test-App 0.11.0.1
+
+## Neu in 0.11 – Fahrzeuge und Altdaten
+
+- Fahrzeuge: Jeder Eintrag gehört zu einem Wagen. Oben in Übersicht, Verlauf und Auswertung schaltest du per Knopf (z. B. „HER-HK 107 ▾“) um. Verbrauch, Kosten, Verlauf und Fälligkeiten gelten für den gewählten Wagen, neue Einträge landen dort. Fahrzeuge bearbeiten oder hinzufügen im selben Fenster.
+- Abgegebene Wagen: keine Fälligkeiten mehr, Kosten und Auswertung beziehen sich auf das letzte Nutzungsjahr bzw. die 12 Monate vor der Abgabe.
+- Daten → Einträge → „Alte Daten importieren“: fügt eine umgewandelte Importdatei hinzu (z. B. `tankbox-altdaten.json` aus der Excel-Tabelle). Vorhandene Einträge bleiben, Doppelte werden übersprungen, ein zweiter Import ändert nichts.
+- Neue Eintragsarten: „Autowäsche“ (ohne Tankung) und „km-Meldung“ (z. B. monatliche Meldung KB-001).
+- CSV-Export mit Spalte „Fahrzeug“, alle Wagen in einer Datei.
 
 ## Neu in 0.10 – Eigener Quittungs-Scanner
 

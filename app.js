@@ -1,6 +1,6 @@
 (function(){
 'use strict';
-const APP_VERSION='0.10.0.1';
+const APP_VERSION='0.11.0.1';
 /* Eigener Speicher je Adresse: die Live-App unter / behält ihre Namen, eine Test-App unter /test/ bekommt eigene */
 const BASE=location.pathname.replace(/[^/]*$/,'');
 const NS=BASE==='/'?'':BASE.replace(/^\/|\/$/g,'').replace(/[^a-z0-9]+/gi,'-').toLowerCase()+'-';
@@ -53,7 +53,7 @@ const fotoGet=id=>st('fotos','readonly',s=>s.get(id)),fotoPut=(id,b)=>st('fotos'
   fotoDel=id=>st('fotos','readwrite',s=>s.delete(id)),fotoKeys=()=>st('fotos','readonly',s=>s.getAllKeys()),fotoClear=()=>st('fotos','readwrite',s=>s.clear());
 
 let db=null;
-const empty=()=>({v:1,did:uid(),fills:[],services:[],stationen:[],meta:{}});
+const empty=()=>({v:1,did:uid(),fills:[],services:[],stationen:[],fahrzeuge:[],meta:{}});
 const dbOk=o=>!!(o&&Array.isArray(o.fills));
 async function load(){
   let a=null,b=null;
@@ -62,6 +62,8 @@ async function load(){
   const ta=dbOk(a)?a.saved||0:-1,tb=dbOk(b)?b.saved||0:-1;
   db=ta<0&&tb<0?empty():tb>ta?b:a;
   if(!db.did)db.did=uid();db.meta=db.meta||{};if(!Array.isArray(db.services))db.services=[];if(!Array.isArray(db.stationen))db.stationen=[];
+  if(!Array.isArray(db.fahrzeuge)||!db.fahrzeuge.length){db.fahrzeuge=[{id:'fz'+uid(),name:'Mein Dienstwagen',aktiv:true,auto:true}]}
+  {const d=db.fahrzeuge[0].id;db.fills.forEach(e=>{if(!e.fz)e.fz=d});db.services.forEach(e=>{if(!e.fz)e.fz=d})}
   if(tb>ta&&ta>=0)setTimeout(()=>toast('Die Daten wurden aus der Zweitkopie wiederhergestellt.'),800);
 }
 let saving=Promise.resolve();
@@ -83,11 +85,11 @@ function setKeys(o){const k=Object.assign(keys(),o);Object.keys(k).forEach(x=>{i
 async function loadKeys(){if(localStorage.getItem(KEYS))return;try{const m=await kvGet('zugang');if(m)localStorage.setItem(KEYS,m)}catch(e){}}
 
 /* ---------- Rechnen: Verbrauch nach Volltank-Methode ---------- */
-const byKm=()=>db.fills.slice().sort((a,b)=>(a.km-b.km)||(a.datum<b.datum?-1:1));
-const byDate=()=>db.fills.slice().sort((a,b)=>(b.datum+(b.zeit||'')).localeCompare(a.datum+(a.zeit||''))||(b.km-a.km));
+const byKm=()=>VF().sort((a,b)=>(a.km-b.km)||(a.datum<b.datum?-1:1));
+const byDate=()=>VF().sort((a,b)=>(b.datum+(b.zeit||'')).localeCompare(a.datum+(a.zeit||''))||(b.km-a.km));
 /* Für jede volle Tankung: Liter seit der letzten vollen Tankung (Teilbetankungen dazwischen eingerechnet) / gefahrene km */
-function calc(){
-  const s=byKm(),out={};let last=null,acc=0;
+function calc(list){
+  const s=list?list.slice().sort((a,b)=>(a.km-b.km)||(a.datum<b.datum?-1:1)):byKm(),out={};let last=null,acc=0;
   for(const f of s){
     const prev=out._p;out[f.id]={dist:prev?f.km-prev.km:null};out._p=f;
     if(last&&f.km>last.km){acc+=+f.liter||0;
@@ -102,10 +104,10 @@ function stats(){
   const fulls=s.filter(f=>c[f.id]&&c[f.id].verb!=null);
   if(fulls.length){const first=s.find(f=>f.voll!==false);const lastF=fulls[fulls.length-1];
     lit=s.filter(f=>f.km>first.km&&f.km<=lastF.km).reduce((a,f)=>a+(+f.liter||0),0);dist=lastF.km-first.km}
-  const y=String(new Date().getFullYear()),ym=iso(new Date()).slice(0,7);
-  const yearF=db.fills.filter(f=>f.datum.startsWith(y)),monF=db.fills.filter(f=>f.datum.startsWith(ym));
+  const R=refDate(),y=String(R.getFullYear()),ym=iso(R).slice(0,7);
+  const yearF=VF().filter(f=>f.datum.startsWith(y)),monF=VF().filter(f=>f.datum.startsWith(ym));
   const sum=a=>a.reduce((t,f)=>t+(+f.betrag||0),0);
-  const svY=db.services.filter(v=>v.datum.startsWith(y)).reduce((t,v)=>t+(+v.betrag||0),0),waY=yearF.reduce((t,f)=>t+(+f.waesche||0),0);
+  const svY=VS().filter(v=>v.datum.startsWith(y)).reduce((t,v)=>t+(+v.betrag||0),0),waY=yearF.reduce((t,f)=>t+(+f.waesche||0),0);
   const kmAll=s.length>1?s[s.length-1].km-s[0].km:0;
   const costAll=s.length>1?s.slice(1).reduce((t,f)=>t+(+f.betrag||0),0):0;
   return {c,avg:dist>0?lit/dist*100:null,year:sum(yearF)+svY+waY,yearX:svY+waY,yearN:yearF.length,month:sum(monF),monthN:monF.length,
@@ -119,7 +121,7 @@ function checks(f,selfId){
   if(P&&(P<.8||P>3.5))w.push('Der Preis pro Liter wirkt ungewöhnlich.');
   if(L>150)w.push('Mehr als 150 Liter auf einmal? Bitte prüfen.');
   if(K>0&&f.datum){
-    const others=db.fills.filter(x=>x.id!==selfId);
+    const others=VF().filter(x=>x.id!==selfId);
     const before=others.filter(x=>x.datum<f.datum||(x.datum===f.datum&&(x.zeit||'')<=(f.zeit||''))).sort((a,b)=>b.km-a.km)[0];
     const after=others.filter(x=>x.datum>f.datum||(x.datum===f.datum&&(x.zeit||'')>(f.zeit||''))).sort((a,b)=>a.km-b.km)[0];
     if(before&&K<=before.km)w.push(`Der Kilometerstand ist nicht höher als bei der Tankung am ${fmtS(before.datum)} (${km(before.km)}).`);
@@ -161,7 +163,7 @@ function ghStatusText(){
   return 'Noch nicht gesichert.';
 }
 /* Was gesichert wird: die Daten ohne Zähler und Zeitstempel, damit unveränderte Stände nicht neu hochgeladen werden */
-const payload=()=>JSON.stringify({app:'tankbox',format:1,version:APP_VERSION,did:db.did,fills:byDate(),services:svcByDate(),stationen:db.stationen},null,1);
+const payload=()=>JSON.stringify({app:'tankbox',format:1,version:APP_VERSION,did:db.did,fahrzeuge:db.fahrzeuge,fills:db.fills.slice().sort((a,b)=>(b.datum+(b.zeit||'')).localeCompare(a.datum+(a.zeit||''))||((b.km||0)-(a.km||0))),services:db.services.slice().sort((a,b)=>b.datum.localeCompare(a.datum)),stationen:db.stationen},null,1);
 async function ghRemote(g){
   const cur=await ghFetch(g,'GET','/contents/daten.json');if(!cur)return {cur:null,json:null};
   let json=null;
@@ -175,7 +177,7 @@ async function ghSync(force){
   ghBusy=true;clearTimeout(ghTimer);ghTimer=0;setGhStat({});
   try{
     // 1) Fotos, die im Repo noch fehlen (Fotos ändern sich nie, daher reicht der Name)
-    const ids=allEntries().map(f=>f.foto).concat(db.stationen.map(x=>x.bild),Object.values(db.meta.brandImgs||{})).filter(Boolean);
+    const ids=allAll().map(f=>f.foto).concat(db.stationen.map(x=>x.bild),Object.values(db.meta.brandImgs||{})).filter(Boolean);
     if(ids.length){
       const list=await ghFetch(g,'GET','/contents/fotos');const have=new Set((list||[]).map(x=>String(x.name).replace(/\.jpg$/,'')));
       for(const id of ids){if(have.has(id))continue;const b=await fotoGet(id).catch(()=>null);if(!b)continue;
@@ -214,13 +216,13 @@ async function ghRestore(g,onStep){
   for(const id of need){onStep&&onStep(++n,need.length);if(await fotoGet(id).catch(()=>null))continue;
     const b=await ghFetch(g,'GET','/contents/fotos/'+encodeURIComponent(id)+'.jpg',null,true).catch(()=>null);
     if(b)await fotoPut(id,new Blob([b],{type:'image/jpeg'}))}
-  db={v:1,did:o.did||uid(),fills:o.fills,services:Array.isArray(o.services)?o.services:[],stationen:Array.isArray(o.stationen)?o.stationen:[],meta:Object.assign({},db.meta,{dirty:0,lastBackup:iso(new Date())})};
+  db={v:1,did:o.did||uid(),fills:o.fills,services:Array.isArray(o.services)?o.services:[],stationen:Array.isArray(o.stationen)?o.stationen:[],fahrzeuge:Array.isArray(o.fahrzeuge)?o.fahrzeuge:[],meta:Object.assign({},db.meta,{dirty:0,lastBackup:iso(new Date())})};
   await save(false);
 }
 
 /* ---------- Sicherungsdatei (zusätzlich oder statt GitHub) ---------- */
 async function exportBackup(){
-  const fotos={};for(const id of allEntries().map(f=>f.foto).concat(db.stationen.map(x=>x.bild),Object.values(db.meta.brandImgs||{})).filter(Boolean)){const b=await fotoGet(id).catch(()=>null);if(b)fotos[id]=toB64(await b.arrayBuffer())}
+  const fotos={};for(const id of allAll().map(f=>f.foto).concat(db.stationen.map(x=>x.bild),Object.values(db.meta.brandImgs||{})).filter(Boolean)){const b=await fotoGet(id).catch(()=>null);if(b)fotos[id]=toB64(await b.arrayBuffer())}
   const o=JSON.parse(payload());o.exported=new Date().toISOString();o.fotos=fotos;
   const ok=await deliverFile('tankbox-sicherung-'+iso(new Date())+'.tankbox',JSON.stringify(o),'application/json');
   if(ok){db.meta.dirty=0;db.meta.lastBackup=iso(new Date());await save(false,false);bkDot();toast('Sicherung erstellt.')}
@@ -231,7 +233,7 @@ async function readBackupFile(file){
   return o}
 async function restoreBackup(o){
   for(const [id,b64] of Object.entries(o.fotos||{}))await fotoPut(id,new Blob([fromB64(b64)],{type:'image/jpeg'}));
-  db={v:1,did:o.did||uid(),fills:o.fills,services:Array.isArray(o.services)?o.services:[],stationen:Array.isArray(o.stationen)?o.stationen:[],meta:Object.assign({},db.meta,{dirty:0,lastBackup:iso(new Date())})};
+  db={v:1,did:o.did||uid(),fills:o.fills,services:Array.isArray(o.services)?o.services:[],stationen:Array.isArray(o.stationen)?o.stationen:[],fahrzeuge:Array.isArray(o.fahrzeuge)?o.fahrzeuge:[],meta:Object.assign({},db.meta,{dirty:0,lastBackup:iso(new Date())})};
   await save(false);closeSheet(false);render();celebrate('Wiederhergestellt');toast(o.fills.length+' Tankungen'+(db.services.length?' und '+db.services.length+' Service-Einträge':'')+' geladen.')}
 async function deliverFile(name,text,type){
   const blob=new Blob([text],{type});
@@ -240,10 +242,11 @@ async function deliverFile(name,text,type){
   const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();
   setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},2000);return true}
 function exportCsv(){
-  const c=calc(),q=v=>'"'+String(v??'').replace(/"/g,'""')+'"',n=(v,d)=>v==null||v===''||isNaN(v)?'':Number(v).toFixed(d).replace('.',',');
-  const rows=[['Typ','Datum','Uhrzeit','Kilometerstand','Liter / Menge','Preis pro Liter','Betrag','Autowäsche','Kraftstoff / Art','Ort','Adresse','Volltank','Gefahrene km','Verbrauch l/100km','Nächste fällig','Notiz'].map(q).join(';')];
-  const all=byKm().map(f=>({k:f.datum+(f.zeit||''),r:()=>{const x=c[f.id]||{};return [q('Tankung'),q(fmtS(f.datum)),q(f.zeit||''),n(f.km,0),n(f.liter,2),n(f.ppl,3),n(f.betrag,2),n(f.waesche,2),q(f.sorte||''),q(f.station||''),q(f.adresse||''),q(f.voll===false?'nein':'ja'),n(x.dist,0),n(x.verb,2),'',q(f.notiz||'')]}}))
-    .concat(db.services.map(v=>({k:v.datum+'~',r:()=>[q(svcName(v)),q(fmtS(v.datum)),'',n(v.km,0),n(v.menge,1),'',n(v.betrag,2),'',q(svcDetail(v)),q(v.ort||''),'','','','',q(nextText(v)),q(v.notiz||'')]})));
+  const c={};db.fahrzeuge.forEach(f=>Object.assign(c,calc(db.fills.filter(e=>e.fz===f.id))));const q=v=>'"'+String(v??'').replace(/"/g,'""')+'"',n=(v,d)=>v==null||v===''||isNaN(v)?'':Number(v).toFixed(d).replace('.',',');
+  const fzn=e=>{const f=fzOf(e.fz);return f?f.name:''};
+  const rows=[['Fahrzeug','Typ','Datum','Uhrzeit','Kilometerstand','Liter / Menge','Preis pro Liter','Betrag','Autowäsche','Kraftstoff / Art','Ort','Adresse','Volltank','Gefahrene km','Verbrauch l/100km','Nächste fällig','Notiz'].map(q).join(';')];
+  const all=db.fills.map(f=>({k:fzn(f)+f.datum+(f.zeit||''),r:()=>{const x=c[f.id]||{};return [q(fzn(f)),q('Tankung'),q(fmtS(f.datum)),q(f.zeit||''),n(f.km,0),n(f.liter,2),n(f.ppl,3),n(f.betrag,2),n(f.waesche,2),q(f.sorte||''),q(f.station||''),q(f.adresse||''),q(f.voll===false?'nein':'ja'),n(x.dist,0),n(x.verb,2),'',q(f.notiz||'')]}}))
+    .concat(db.services.map(v=>({k:fzn(v)+v.datum+'~',r:()=>[q(fzn(v)),q(svcName(v)),q(fmtS(v.datum)),'',n(v.km,0),n(v.menge,1),'',n(v.betrag,2),'',q(svcDetail(v)),q(v.ort||''),'','','','',q(nextText(v)),q(v.notiz||'')]})));
   all.sort((a,b)=>a.k.localeCompare(b.k)).forEach(x=>rows.push(x.r().join(';')));
   return deliverFile('tankbox-'+iso(new Date())+'.csv','﻿'+rows.join('\r\n'),'text/csv')}
 
@@ -340,6 +343,7 @@ function render(){
   const s=stats();
   if(tab==='home')main.innerHTML=viewHome(s);else if(tab==='liste')main.innerHTML=viewList(s);else main.innerHTML=viewStats(s);
   main.querySelectorAll('[data-fill]').forEach(b=>b.onclick=()=>openDetail(b.dataset.fill));
+  main.querySelectorAll('[data-fz]').forEach(b=>b.onclick=()=>openFz());
   main.querySelectorAll('[data-svc]').forEach(b=>b.onclick=()=>openSvcDetail(b.dataset.svc));
   main.querySelectorAll('[data-due]').forEach(b=>b.onclick=()=>openSvcForm(null,b.dataset.due));
   const rm=main.querySelector('[data-bk]');if(rm)rm.onclick=()=>openMenu('gh');
@@ -353,15 +357,15 @@ function fitFacts(){main.querySelectorAll('.fact b').forEach(b=>{b.style.fontSiz
 addEventListener('resize',()=>{clearTimeout(fitFacts.t);fitFacts.t=setTimeout(fitFacts,150)});
 function viewHome(s){
   const recent=timeline().slice(0,5);
-  if(!db.fills.length&&!db.services.length)return `<section class="view">
+  if(!VF().length&&!VS().length)return `<section class="view">${db.fahrzeuge.length>1?fzChip():''}
     <div class="summary"><div><div class="label">Willkommen</div><p style="margin:6px 0 0">Erfasse jede Tankung des Dienstwagens mit Quittungsfoto. Die MyTankBox rechnet Verbrauch und Kosten aus.</p></div>
     <div class="actions"><button type="button" class="btn primary" data-new="foto">Erste Tankung erfassen</button></div></div>
     ${ghCfg()?'':`<p class="hint">Neues Handy? Unter <b>Daten</b> → Datensicherung → „GitHub einrichten“ holst du deine Tankungen aus GitHub zurück.</p>`}</section>`;
-  return `<section class="view">${DS.remindHtml(bkInfo(),'data-bk')}
+  return `<section class="view">${DS.remindHtml(bkInfo(),'data-bk')}${fzChip()}
     <div class="summary">
       <div><div class="label">Durchschnittsverbrauch</div><div class="bigcost"><span class="num"${s.avg!=null?` data-count="avg" data-v="${s.avg}" data-f="l1"`:''}>${s.avg!=null?nf(s.avg,1):'–'}</span><small>l/100 km${s.avg==null?' · ab zwei vollen Tankungen':''}</small></div></div>
       <div class="facts">
-        <div class="fact"><b class="num" data-count="year" data-v="${s.year}" data-f="eur0">${eur0(s.year)}</b><span>Kosten ${new Date().getFullYear()}<br><small>${s.yearN} Tankung${s.yearN===1?'':'en'}${s.yearX?'<br>inkl. '+eur0(s.yearX)+' Extras':''}</small></span></div>
+        <div class="fact"><b class="num" data-count="year" data-v="${s.year}" data-f="eur0">${eur0(s.year)}</b><span>Kosten ${refDate().getFullYear()}<br><small>${s.yearN} Tankung${s.yearN===1?'':'en'}${s.yearX?'<br>inkl. '+eur0(s.yearX)+' Extras':''}</small></span></div>
         <div class="fact"><b class="num"${s.per100!=null?` data-count="p100" data-v="${s.per100}" data-f="eur"`:''}>${s.per100!=null?eur(s.per100):'–'}</b><span>Sprit pro 100 km</span></div>
         <div class="fact"><b class="num"${s.kmNow!=null?` data-count="km" data-v="${s.kmNow}" data-f="n0"`:''}>${s.kmNow!=null?nf(s.kmNow,0):'–'}</b><span>km-Stand</span></div>
       </div></div>
@@ -371,23 +375,23 @@ function viewHome(s){
   </section>`}
 function viewList(s){
   const tl=timeline();
-  if(!tl.length)return `<section class="view"><div class="list"><div class="empty">Noch keine Einträge.</div></div></section>`;
+  if(!tl.length)return `<section class="view">${fzChip()}<div class="list"><div class="empty">Noch keine Einträge.</div></div></section>`;
   const groups={};tl.forEach(f=>{(groups[f.datum.slice(0,7)]=groups[f.datum.slice(0,7)]||[]).push(f)});
-  return `<section class="view">${Object.entries(groups).map(([ym,fs])=>{const [y,m]=ym.split('-').map(Number);
+  return `<section class="view">${fzChip()}${Object.entries(groups).map(([ym,fs])=>{const [y,m]=ym.split('-').map(Number);
     const lit=fs.filter(f=>!f.typ).reduce((a,f)=>a+(+f.liter||0),0);
     return `<div><div class="sechead"><h2>${MON[m-1]} ${y}</h2><span class="count num">${eur(fs.reduce((a,f)=>a+cost(f),0))}${lit?' · '+nf(lit,1)+' l':''}</span></div>
       <div class="list" style="margin-top:10px">${fs.map((f,i)=>entryRow(f,s.c,i)).join('')}</div></div>`}).join('')}</section>`}
 function viewStats(s){
-  if(allEntries().length<2)return `<section class="view"><div class="list"><div class="empty">Auswertungen gibt es ab zwei Einträgen.</div></div></section>`;
+  if(allEntries().length<2)return `<section class="view">${fzChip()}<div class="list"><div class="empty">Auswertungen gibt es ab zwei Einträgen.</div></div></section>`;
   // Kosten der letzten 12 Monate
-  const now=new Date(),months=[];for(let i=11;i>=0;i--){const d=new Date(now.getFullYear(),now.getMonth()-i,1);months.push(iso(d).slice(0,7))}
+  const now=refDate(),months=[];for(let i=11;i>=0;i--){const d=new Date(now.getFullYear(),now.getMonth()-i,1);months.push(iso(d).slice(0,7))}
   const mc=months.map(ym=>({ym,v:allEntries().filter(f=>f.datum.startsWith(ym)).reduce((a,f)=>a+cost(f),0)}));
   const mx=Math.max(1,...mc.map(x=>x.v));
   const fulls=byKm().filter(f=>s.c[f.id]&&s.c[f.id].verb!=null).slice(-10).reverse();
   const vmx=Math.max(1,...fulls.map(f=>s.c[f.id].verb));
   const pp=byDate().filter(f=>f.ppl).slice(0,10);
-  return `<section class="view">
-    <div class="summary"><div class="label">Kosten der letzten 12 Monate</div>
+  return `<section class="view">${fzChip()}
+    <div class="summary"><div class="label">Kosten der letzten 12 Monate${fzOf(curFz())&&fzOf(curFz()).bis?' vor der Abgabe':''}</div>
       <div class="bars">${mc.map(x=>{const [y,m]=x.ym.split('-').map(Number);return `<div class="bar"><span class="bl">${MON[m-1].slice(0,3)} ${String(y).slice(2)}</span><span class="track"><span class="fill" style="width:${(x.v/mx*100).toFixed(1)}%"></span></span><span class="num">${x.v?eur(x.v):'–'}</span></div>`}).join('')}</div>
       <p class="hint">Summe inkl. Wäsche und Service: ${eur(mc.reduce((a,x)=>a+x.v,0))}${s.kmYear?' · '+km(s.kmYear)+' gefahren in '+now.getFullYear():''}</p></div>
     ${breakdownHtml()}
@@ -430,13 +434,15 @@ const SVC={
   reifen:{n:'Reifenwechsel',ic:'<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3"/><path d="M12 3.5v5.5M12 15v5.5M3.5 12H9M15 12h5.5"/>'},
   inspektion:{n:'Inspektion',ic:'<path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L4 17l3 3 5.3-5.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.4-.6-.6-2.4z"/>'},
   tuev:{n:'TÜV / HU',ic:'<circle cx="12" cy="10" r="6"/><path d="M9.5 10l2 2 3.5-3.5M8.5 15.5L7 21l5-2 5 2-1.5-5.5"/>'},
+  waesche:{n:'Autowäsche',ic:'<path d="M5 17V12l2-5h10l2 5v5H5z"/><path d="M8 4.5c0-1 1-1.5 1-1.5s1 .5 1 1.5a1 1 0 0 1-2 0zM14 4.5c0-1 1-1.5 1-1.5s1 .5 1 1.5a1 1 0 0 1-2 0z"/><path d="M5 12h14"/>'},
+  kmmeldung:{n:'km-Meldung',ic:'<circle cx="12" cy="13" r="8"/><path d="M12 13l4-3M8 5l1 2M16 5l-1 2"/>'},
   panne:{n:'Panne',ic:'<path d="M12 3l9.5 17h-19z"/><path d="M12 10v4.5M12 17.5v.2"/>'},
   sonst:{n:'Sonstiges',ic:'<circle cx="12" cy="12" r="8.5"/><path d="M8 12h8M12 8v8"/>'}};
 const REIFEN=['Winterreifen drauf','Sommerreifen drauf','Ganzjahresreifen drauf','Neue Reifen'];
 const svcIco=(t,c='')=>`<svg class="${c}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${(SVC[t]||SVC.sonst).ic}</svg>`;
 const svcName=v=>v.typ==='sonst'&&v.titel?v.titel:(SVC[v.typ]||SVC.sonst).n;
-const svcByDate=()=>db.services.slice().sort((a,b)=>b.datum.localeCompare(a.datum)||((b.km||0)-(a.km||0)));
-const allEntries=()=>db.fills.concat(db.services);
+const svcByDate=()=>VS().sort((a,b)=>b.datum.localeCompare(a.datum)||((b.km||0)-(a.km||0)));
+const allEntries=()=>VF().concat(VS());
 const fillCost=f=>(+f.betrag||0)+(+f.waesche||0);
 const cost=e=>e.typ?(+e.betrag||0):fillCost(e);
 /* Gemeinsame Zeitleiste, neueste zuerst */
@@ -460,6 +466,7 @@ function svcRow(v,i){const d=parse(v.datum),det=svcDetail(v);
 
 /* Fällig: TÜV, Inspektion (Datum oder km), aktuelle Bereifung */
 function dueHtml(){
+  const fz=fzOf(curFz());if(fz&&fz.bis)return `<p class="hint">${esc(fz.name)} wurde am ${fmtS(fz.bis)} abgegeben${fz.endKm?' bei '+km(fz.endKm):''}. Fälligkeiten werden nicht mehr angezeigt.</p>`;
   const last=t=>svcByDate().find(v=>v.typ===t);
   const kmNow=(()=>{const a=allEntries().map(e=>+e.km||0);return a.length?Math.max(...a):null})();
   const items=[];
@@ -482,9 +489,9 @@ function dueHtml(){
 
 /* Kosten nach Art im laufenden Jahr */
 function breakdownHtml(){
-  const y=String(new Date().getFullYear());const parts={Kraftstoff:0,Autowäsche:0};
-  db.fills.filter(f=>f.datum.startsWith(y)).forEach(f=>{parts.Kraftstoff+=+f.betrag||0;parts.Autowäsche+=+f.waesche||0});
-  db.services.filter(v=>v.datum.startsWith(y)).forEach(v=>{const n=(SVC[v.typ]||SVC.sonst).n;parts[n]=(parts[n]||0)+(+v.betrag||0)});
+  const y=String(refDate().getFullYear());const parts={Kraftstoff:0,Autowäsche:0};
+  VF().filter(f=>f.datum.startsWith(y)).forEach(f=>{parts.Kraftstoff+=+f.betrag||0;parts.Autowäsche+=+f.waesche||0});
+  VS().filter(v=>v.datum.startsWith(y)).forEach(v=>{const n=(SVC[v.typ]||SVC.sonst).n;parts[n]=(parts[n]||0)+(+v.betrag||0)});
   const rows=Object.entries(parts).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]);if(!rows.length)return '';
   const mx=rows[0][1],tot=rows.reduce((a,[,v])=>a+v,0);
   return `<div class="summary"><div class="label">Kosten ${y} nach Art</div>
@@ -577,7 +584,7 @@ function openSvcForm(id,typ){
       if(t==='tuev')o.next=el.nextm.value||null;
       if(t==='inspektion'){o.next=el.nextd.value||null;o.nextKm=Math.round(num(el.nextkm.value))||null}
       if(o.km&&kmNow&&o.km>kmNow+5000&&!fm.dataset.ok){fm.dataset.ok='1';toast('Der Kilometerstand liegt weit über dem letzten. Nochmal „Speichern“ tippen, wenn er stimmt.');buzz([20,40,20]);return}
-      const rec=Object.assign(old?{id:old.id,created:old.created,foto:old.foto}:{id:uid(),created:Date.now()},o,{updated:Date.now()});
+      const rec=Object.assign(old?{id:old.id,created:old.created,foto:old.foto,fz:old.fz}:{id:uid(),created:Date.now(),fz:curFz()},o,{updated:Date.now()});
       Object.keys(rec).forEach(k=>{if(rec[k]==null||rec[k]===''||(typeof rec[k]==='number'&&Number.isNaN(rec[k])))delete rec[k]});
       if(newFoto){const fid=uid();await fotoPut(fid,newFoto);if(rec.foto)fotoDel(rec.foto).catch(()=>{});rec.foto=fid}
       else if(fotoGone&&rec.foto){fotoDel(rec.foto).catch(()=>{});delete rec.foto}
@@ -899,6 +906,54 @@ function openScanner(){
   });
 }
 
+/* ---------- Fahrzeuge: jede Tankung und jeder Service gehört zu einem Wagen ---------- */
+const curFz=()=>{const f=db.fahrzeuge||[];return (f.find(x=>x.id===db.meta.fz)||f.find(x=>x.aktiv)||f[0]||{}).id};
+const fzOf=id=>(db.fahrzeuge||[]).find(x=>x.id===id);
+const isCur=e=>{const c=curFz();return !c||(e.fz||db.fahrzeuge[0].id)===c};
+const VF=()=>db.fills.filter(isCur),VS=()=>db.services.filter(isCur);
+const allAll=()=>db.fills.concat(db.services);
+/* Bezugsdatum: heute – bei einem abgegebenen Wagen der letzte Eintrag bzw. die Abgabe */
+function refDate(){const f=fzOf(curFz());if(!f||!f.bis)return new Date();
+  const last=VF().concat(VS()).reduce((m,e)=>e.datum>m?e.datum:m,'');return parse(last&&last<f.bis?last:f.bis)}
+function fzChip(){const f=fzOf(curFz());if(!f)return '';
+  return `<button type="button" class="fzchip" data-fz><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 16V11l2-5h10l2 5v5"/><path d="M3 16h18v3H3zM7 19v1.5M17 19v1.5M5 11h14"/></svg><span>${esc(f.name)}</span>${f.aktiv?'':'<small>früherer Wagen</small>'}<span class="fzarr" aria-hidden="true">▾</span></button>`}
+function openFz(){
+  const list=(db.fahrzeuge||[]).slice().sort((a,b)=>(b.aktiv?1:0)-(a.aktiv?1:0)||String(b.von||'').localeCompare(String(a.von||'')));
+  const cnt=id=>allAll().filter(e=>(e.fz||db.fahrzeuge[0].id)===id).length;
+  openSheet(head('Fahrzeug')+`
+    <p class="hint" style="margin-top:0">Verbrauch, Kosten, Verlauf und Fälligkeiten gelten für den gewählten Wagen. Neue Einträge landen beim gewählten Wagen.</p>
+    <div class="stlist">${list.map(f=>`<button type="button" class="strow${f.id===curFz()?' sel':''}" data-pick="${f.id}"><span class="stb" style="--stc:${f.aktiv?'var(--accent)':'#64748B'}">${esc((f.name.match(/[A-Z0-9]/)||['?'])[0])}</span>
+      <span><b>${esc(f.name)}${f.aktiv?' · aktuell':''}</b><small>${f.von?'seit '+fmtS(f.von):''}${f.bis?' bis '+fmtS(f.bis):''}${f.von||f.bis?' · ':''}${cnt(f.id)} Einträge</small></span></button>`).join('')}</div>
+    <div class="actions two" style="margin-top:14px"><button type="button" class="btn" id="fzEdit">Gewählten bearbeiten</button><button type="button" class="btn" id="fzAdd">Fahrzeug hinzufügen</button></div>`,
+  s=>{s.querySelectorAll('[data-pick]').forEach(b=>b.onclick=()=>{db.meta.fz=b.dataset.pick;save(false,false);buzz(6);closeSheet();shown={};render()});
+    s.querySelector('#fzAdd').onclick=()=>editFz(null);s.querySelector('#fzEdit').onclick=()=>editFz(fzOf(curFz()))});
+}
+function editFz(f){
+  dsForm(f?'Fahrzeug bearbeiten':'Fahrzeug hinzufügen',[{k:'name',l:'Kennzeichen oder Name',req:true,v:f?f.name:''},{k:'von',l:'Seit (TT.MM.JJJJ, optional)',v:f&&f.von?fmtS(f.von):''},{k:'bis',l:'Abgegeben am (optional)',v:f&&f.bis?fmtS(f.bis):''}],
+    async(v,fail)=>{const name=v.name.trim();if(!name)return fail('Bitte einen Namen eintragen.');
+      const dt=t=>{const m=String(t).trim().match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);return m?m[3]+'-'+m[2].padStart(2,'0')+'-'+m[1].padStart(2,'0'):''};
+      if(v.von.trim()&&!dt(v.von))return fail('„Seit“ bitte als TT.MM.JJJJ.');if(v.bis.trim()&&!dt(v.bis))return fail('„Abgegeben“ bitte als TT.MM.JJJJ.');
+      const o=f||{id:'fz'+uid()};o.name=name;o.von=dt(v.von)||undefined;o.bis=dt(v.bis)||undefined;delete o.auto;
+      if(!f){db.fahrzeuge.forEach(x=>{if(!x.bis)x.aktiv=false});o.aktiv=!o.bis;db.fahrzeuge.push(o);db.meta.fz=o.id}else o.aktiv=!o.bis&&(o.aktiv||!db.fahrzeuge.some(x=>x!==o&&x.aktiv));
+      await save();closeSheet(false);render();toast('Gespeichert.')},{ok:'Speichern'});
+}
+/* Altdaten (aus der Excel-Tabelle umgewandelt) zusammenführen – nichts wird überschrieben, Doppelte werden übersprungen */
+async function importOld(o){
+  if(!o||o.app!=='tankbox-import'||!Array.isArray(o.fahrzeuge))throw new Error('Das ist keine MyTankBox-Importdatei.');
+  const norm=s=>String(s||'').toUpperCase().replace(/[^A-Z0-9]/g,'');const map={};
+  for(const nf_ of o.fahrzeuge){let f=db.fahrzeuge.find(x=>norm(x.name)===norm(nf_.name));
+    if(!f&&nf_.aktiv){f=db.fahrzeuge.find(x=>x.auto)}
+    if(!f){f={id:'fz'+uid()};db.fahrzeuge.push(f)}
+    Object.assign(f,{name:nf_.name,von:nf_.von||f.von,bis:nf_.bis||f.bis,aktiv:!!nf_.aktiv,startKm:nf_.startKm||f.startKm,endKm:nf_.endKm||f.endKm});delete f.auto;map[nf_.key]=f.id}
+  if(o.fahrzeuge.some(x=>x.aktiv))db.fahrzeuge.forEach(f=>{if(!o.fahrzeuge.some(x=>map[x.key]===f.id&&x.aktiv)&&o.fahrzeuge.some(x=>map[x.key]===f.id))f.aktiv=false});
+  const key=e=>[e.fz,e.typ||'t',e.datum,e.km||'',Math.round((+e.betrag||0)*100),Math.round((+e.liter||+e.menge||0)*100),e.titel||''].join('|');
+  const have=new Set(allAll().map(e=>key(Object.assign({},e,{fz:e.fz||db.fahrzeuge[0].id}))));
+  let nF=0,nS=0,skip=0;
+  for(const e of o.fills||[]){const r=Object.assign({},e,{id:uid(),fz:map[e.fz],created:Date.now(),import:true});if(have.has(key(r))){skip++;continue}have.add(key(r));db.fills.push(r);nF++}
+  for(const e of o.services||[]){const r=Object.assign({},e,{id:uid(),fz:map[e.fz],created:Date.now(),import:true});if(have.has(key(r))){skip++;continue}have.add(key(r));db.services.push(r);nS++}
+  const akt=o.fahrzeuge.find(x=>x.aktiv);if(akt)db.meta.fz=map[akt.key];
+  await save();return {nF,nS,skip}}
+
 /* ---------- Formular ---------- */
 async function shrink(file){
   const bmp=await createImageBitmap(file).catch(()=>null);
@@ -1008,7 +1063,7 @@ function openForm(id,withPhoto){
       if(bad.length){bad.forEach(k=>fm.elements[k].closest('.field').classList.add('no'));buzz([20,40,20]);toast('Bitte Datum, Kilometerstand, Liter und Betrag ausfüllen.');return}
       const w=checks(o,old&&old.id);
       if(w.length&&!fm.dataset.ok){fm.dataset.ok='1';warn.hidden=false;warn.innerHTML=w.map(esc).join('<br>')+'<br><b>Nochmal „Speichern“ tippen, um trotzdem zu speichern.</b>';buzz([20,40,20]);warn.scrollIntoView({block:'nearest',behavior:'smooth'});return}
-      const rec=Object.assign(old||{id:uid(),created:Date.now()},o,{updated:Date.now()});
+      const rec=Object.assign(old||{id:uid(),created:Date.now(),fz:curFz()},o,{updated:Date.now()});
       if(newFoto){const fid=uid();await fotoPut(fid,newFoto);if(rec.foto)fotoDel(rec.foto).catch(()=>{});rec.foto=fid}
       else if(fotoGone&&rec.foto){fotoDel(rec.foto).catch(()=>{});rec.foto=null}
       if(!rec.ppl||Number.isNaN(rec.ppl))delete rec.ppl;
@@ -1129,6 +1184,9 @@ function openMenu(open){
   +mAcc('stat','pump','Tankstellen',db.stationen.length+' gemerkt · Abzeichen & Bilder',`<p class="ds-hint">Tippe eine Tankstelle an, um Name, Farbe oder ein eigenes Bild (z. B. Foto vom Schild) festzulegen.</p>${stationsHtml()}${brandsHtml()}${cardBrandsHtml()}`)
   +mAcc('look','sun','Darstellung',({auto:'Automatisch',light:'Hell',dark:'Dunkel'})[DS.getTheme()]+' · hell oder dunkel',`<div class="ds-lbl">Hell oder dunkel</div>${DS.themeHtml()}`)
   +mAcc('eintr','list','Einträge',db.fills.length+' Tankung'+(db.fills.length===1?'':'en')+(db.services.length?' · '+db.services.length+' Service':''),`
+    <p class="ds-hint">Alte Daten (z. B. aus deiner Excel-Tabelle umgewandelt) hinzufügen. Vorhandene Einträge bleiben, Doppelte werden übersprungen.</p>
+    <div class="ds-acts"><label class="ds-btn">Alte Daten importieren<input id="impIn" type="file" accept=".json,.tankimport,application/json" hidden></label><button type="button" class="ds-btn" id="fzGo">Fahrzeuge</button></div>
+    <div class="ds-lbl sep">Alles löschen</div>
     <p class="ds-hint">Löscht alle Tankungen und Fotos auf diesem Handy. In GitHub bleibt alles liegen. Das lässt sich nicht rückgängig machen.</p>
     <div class="ds-acts"><button type="button" class="ds-btn dng" id="del">Alle Einträge löschen</button></div>`)
   +`<div class="ds-lbl">Meine Boxen</div>${DS.boxesHtml()}<p class="ds-ver">MyTankBox · Version ${APP_VERSION}${IS_TEST?' · Test-App, eigener Speicher':''}</p>`,
@@ -1172,10 +1230,14 @@ function openMenu(open){
     bi.addEventListener('change',async()=>{const file=bi.files[0];bi.value='';if(!file)return;
       let o;try{o=await readBackupFile(file)}catch(x){toast(x.message);return}
       if(confirm(`Die Tankungen auf diesem Handy werden durch die Sicherung ersetzt (${o.fills.length} Tankungen). Fortfahren?`))saving.then(()=>restoreBackup(o))});
-    s.querySelector('#csvGo').onclick=async()=>{if(!allEntries().length){toast('Noch keine Einträge.');return}if(await exportCsv())toast('CSV exportiert.')};
-    s.querySelector('#del').onclick=async()=>{if(!allEntries().length){toast('Es gibt nichts zu löschen.');return}
-      if(!confirm('Wirklich alle '+allEntries().length+' Einträge und Fotos auf diesem Handy löschen?'))return;
-      db.fills=[];db.services=[];db.did=uid();await fotoClear().catch(()=>{});await save();closeSheet(false);render();toast('Alle Einträge gelöscht.')};
+    s.querySelector('#fzGo').onclick=()=>openFz();
+    const impIn=s.querySelector('#impIn');impIn.addEventListener('change',async()=>{const f=impIn.files[0];impIn.value='';if(!f)return;
+      let o;try{o=JSON.parse(await f.text())}catch(x){toast('Die Datei lässt sich nicht lesen.');return}
+      try{const r=await importOld(o);closeSheet(false);shown={};render();celebrate('Importiert');toast(`${r.nF} Tankungen und ${r.nS} weitere Einträge übernommen${r.skip?`, ${r.skip} doppelte übersprungen`:''}.`)}catch(x){toast(x.message||'Import hat nicht geklappt.')}});
+    s.querySelector('#csvGo').onclick=async()=>{if(!allAll().length){toast('Noch keine Einträge.');return}if(await exportCsv())toast('CSV exportiert.')};
+    s.querySelector('#del').onclick=async()=>{if(!allAll().length){toast('Es gibt nichts zu löschen.');return}
+      if(!confirm('Wirklich alle '+allAll().length+' Einträge und Fotos auf diesem Handy löschen?'))return;
+      db.fills=[];db.services=[];db.fahrzeuge=[{id:'fz'+uid(),name:'Mein Dienstwagen',aktiv:true,auto:true}];db.meta.fz=null;db.did=uid();await fotoClear().catch(()=>{});await save();closeSheet(false);render();toast('Alle Einträge gelöscht.')};
   });
 }
 
