@@ -1,6 +1,6 @@
 (function(){
 'use strict';
-const APP_VERSION='0.13.1.1';
+const APP_VERSION='0.13.2.1';
 /* Eigener Speicher je Adresse: die Live-App unter / behält ihre Namen, eine Test-App unter /test/ bekommt eigene */
 const BASE=location.pathname.replace(/[^/]*$/,'');
 const NS=BASE==='/'?'':BASE.replace(/^\/|\/$/g,'').replace(/[^a-z0-9]+/gi,'-').toLowerCase()+'-';
@@ -448,18 +448,21 @@ function viewStats(s){
   const yrs=yearsAvail();if(!['12m','all'].includes(stv.p)&&!yrs.includes(stv.p))stv.p='12m';
   const r=periodRange(),fP=F.filter(e=>inP(e,r)),sP=S.filter(e=>inP(e,r)),c=calcScope();
   const fuel=fP.reduce((a,f)=>a+(+f.betrag||0),0),wash=fP.reduce((a,f)=>a+(+f.waesche||0),0)+sP.filter(v=>v.typ==='waesche').reduce((a,v)=>a+(+v.betrag||0),0),
-    serv=sP.filter(v=>v.typ!=='waesche').reduce((a,v)=>a+(+v.betrag||0),0),total=fuel+wash+serv,lit=fP.reduce((a,f)=>a+(+f.liter||0),0),kmD=kmDriven(r);
+    adb=sP.filter(v=>v.typ==='adblue'),adbE=adb.reduce((a,v)=>a+(+v.betrag||0),0),adbL=adb.reduce((a,v)=>a+(+v.menge||0),0),
+    serv=sP.filter(v=>v.typ!=='waesche'&&v.typ!=='adblue').reduce((a,v)=>a+(+v.betrag||0),0),total=fuel+wash+adbE+serv,lit=fP.reduce((a,f)=>a+(+f.liter||0),0),kmD=kmDriven(r);
   const verbs=fP.filter(f=>c[f.id]&&c[f.id].verb!=null);const vl=verbs.reduce((a,f)=>a+c[f.id].seit*c[f.id].verb/100,0),vk=verbs.reduce((a,f)=>a+c[f.id].seit,0);
   const avgV=vk?vl/vk*100:null,avgP=lit?fP.filter(f=>f.liter).reduce((a,f)=>a+(+f.betrag||0),0)/lit:null;
   // Monate oder Jahre
   const months=monthsBetween(r.from,r.to),byYear=months.length>36;
   const buckets=byYear?[...new Set(months.map(m=>m.slice(0,4)))]:months;
   const bk=e=>byYear?e.datum.slice(0,4):e.datum.slice(0,7);
-  const C1='var(--c1)',C2='var(--c2)',C3='var(--c3)';
+  const C1='var(--c1)',C2='var(--c2)',C3='var(--c3)',C4='var(--c4)';
   const sum=(arr,fn)=>buckets.map(b=>arr.filter(e=>bk(e)===b).reduce((a,e)=>a+fn(e),0));
-  const vFuel=sum(fP,f=>+f.betrag||0),vWash=buckets.map((b,i)=>sum(fP,f=>+f.waesche||0)[i]+sum(sP.filter(v=>v.typ==='waesche'),v=>+v.betrag||0)[i]),vServ=sum(sP.filter(v=>v.typ!=='waesche'),v=>+v.betrag||0);
+  const vFuel=sum(fP,f=>+f.betrag||0),vWash=buckets.map((b,i)=>sum(fP,f=>+f.waesche||0)[i]+sum(sP.filter(v=>v.typ==='waesche'),v=>+v.betrag||0)[i]),vAdb=sum(sP.filter(v=>v.typ==='adblue'),v=>+v.betrag||0),vServ=sum(sP.filter(v=>v.typ!=='waesche'&&v.typ!=='adblue'),v=>+v.betrag||0);
   const labels=buckets.map(b=>byYear?{s:b,long:b}:{s:MON[+b.slice(5)-1].slice(0,3)+(months.length>13?' '+b.slice(2,4):''),long:MON[+b.slice(5)-1]+' '+b.slice(0,4)});
-  const costSeries=[{name:'Kraftstoff',c:C1,vals:vFuel},{name:'Wäsche',c:C2,vals:vWash},{name:'Service',c:C3,vals:vServ}].filter(x=>x.vals.some(v=>v>0));
+  const costSeries=[{name:'Kraftstoff',c:C1,vals:vFuel},{name:'Wäsche',c:C2,vals:vWash},{name:'AdBlue',c:C4,vals:vAdb},{name:'Service',c:C3,vals:vServ}].filter(x=>x.vals.some(v=>v>0));
+  const adbSeries=[{name:'AdBlue',c:C4,vals:sum(sP.filter(v=>v.typ==='adblue'),v=>+v.menge||0)}];
+  const adbAll=S.filter(v=>v.typ==='adblue').sort((a,b)=>b.datum.localeCompare(a.datum)),adbLast=adbAll[0],kmNowS=Math.max(0,...F.concat(S).map(e=>+e.km||0));
   const litSeries=[{name:'Liter',c:C1,vals:sum(fP,f=>+f.liter||0)}];
   // Verbrauch & Preis je Tankung
   const vPts=verbs.slice().sort((a,b)=>a.datum.localeCompare(b.datum)).map(f=>({d:f.datum,v:c[f.id].verb,hl:avgV&&c[f.id].verb>avgV*1.2,tip:`${km(c[f.id].seit)}${stv.all?' · '+(fzOf(f.fz)||{}).name:''}`}));
@@ -472,7 +475,8 @@ function viewStats(s){
   const yrow=y=>{const rr={from:y+'-01',to:y+'-12'};const f=allF.filter(e=>inP(e,rr)),sv=allS.filter(e=>inP(e,rr));const l=f.reduce((a,x)=>a+(+x.liter||0),0),fu=f.reduce((a,x)=>a+(+x.betrag||0),0);
     const tot=fu+f.reduce((a,x)=>a+(+x.waesche||0),0)+sv.reduce((a,x)=>a+(+x.betrag||0),0),k=kmDriven(rr);const vv=f.filter(x=>c[x.id]&&c[x.id].verb!=null);
     const a1=vv.reduce((a,x)=>a+c[x.id].seit*c[x.id].verb/100,0),a2=vv.reduce((a,x)=>a+c[x.id].seit,0);
-    return {y,n:f.length,k,l,v:a2?a1/a2*100:null,p:l?fu/l:null,tot,c100:k?tot/k*100:null}};
+    const ad=sv.filter(x=>x.typ==='adblue').reduce((a,x)=>a+(+x.menge||0),0);
+    return {y,n:f.length,k,l,ad,v:a2?a1/a2*100:null,p:l?fu/l:null,tot,c100:k?tot/k*100:null}};
   const yr=ys.map(yrow);
   // Tankstellen & Rekorde
   const stc={};fP.forEach(f=>{if(!f.station)return;const o=stc[f.station]||(stc[f.station]={n:0,e:0});o.n++;o.e+=fillCost(f)});
@@ -492,16 +496,19 @@ function viewStats(s){
         <div><b class="num">${kmD?eur(total/kmD*100):'–'}</b><span>Kosten je 100 km</span></div>
       </div></div>
     ${card(`Kosten je ${byYear?'Jahr':'Monat'}`,costSeries.length?legend(costSeries.map(x=>({n:x.name,c:x.c})))+barSvg('chCost',labels,costSeries,eurAx,{maxLabels:months.length>13&&!byYear?4:7,aria:'Kosten je '+(byYear?'Jahr':'Monat')}):'<p class="hint">Keine Kosten im Zeitraum.</p>',
-      `Kraftstoff ${eur(fuel)} · Wäsche ${eur(wash)} · Service ${eur(serv)}`)}
+      `Kraftstoff ${eur(fuel)} · Wäsche ${eur(wash)} · AdBlue ${eur(adbE)} · Service ${eur(serv)}`)}
     ${card('Verbrauch je Tankung (l/100 km)',lineSvg('chVerb',vPts,(v,ax)=>nf(v,ax?1:2)+(ax?'':' l'),{c:C1,avg:avgV,aria:'Verbrauch je Tankung'}),
       vPts.length?`Gestrichelt: Durchschnitt ${avgV!=null?nf(avgV,2):'–'} l. Orange Punkte: über 20 % mehr – fehlt da eine Quittung?`:'')}
     ${card('Preis pro Liter',lineSvg('chPrice',pPts,(v,ax)=>nf(v,ax?2:3)+(ax?'':' €'),{c:C2,avg:avgP,aria:'Preis pro Liter'}),
       byP.length?`Günstigster ${nf(byP[0].ppl,3)} € (${fmtS(byP[0].datum)}) · teuerster ${nf(byP[byP.length-1].ppl,3)} € (${fmtS(byP[byP.length-1].datum)})`:'')}
+    ${adbAll.length?card('AdBlue',`<div class="kpis k4"><div><b class="num">${nf(adbL,0)} l</b><span>nachgefüllt · ${adb.length}×</span></div><div><b class="num">${eur0(adbE)}</b><span>Kosten</span></div>
+        <div><b class="num">${kmD&&adbL?nf(adbL/kmD*1000,2):'–'}</b><span>l je 1.000 km</span></div><div><b class="num">${adbL?nf(adbE/adbL,2):'–'}</b><span>Ø €/Liter</span></div></div>`+(adb.length?barSvg('chAdb',labels,adbSeries,(v,ax)=>nf(v,0)+(ax?'':' l'),{maxLabels:months.length>13&&!byYear?4:7,aria:'AdBlue-Liter'}):''),
+      adbLast?`Zuletzt ${fmtS(adbLast.datum)}: ${nf(adbLast.menge||0,0)} l${adbLast.km&&kmNowS>adbLast.km?` · seitdem ${km(kmNowS-adbLast.km)}`:''}${adbLast.notiz?' · '+esc(adbLast.notiz):''}`:''):''}
     ${card(`Getankte Liter je ${byYear?'Jahr':'Monat'}`,barSvg('chLit',labels,litSeries,(v,ax)=>nf(v,0)+(ax?'':' l'),{maxLabels:months.length>13&&!byYear?4:7,aria:'Liter'}))}
     ${pr.length?`<div class="summary"><div class="label">Kosten nach Art</div><div class="bars">${pr.map(([k,v])=>`<div class="bar"><span class="bl">${esc(k)}</span><span class="track"><span class="fill" style="width:${(v/pmx*100).toFixed(1)}%"></span></span><span class="num">${eur(v)} <small class="muted">${nf(v/total*100,0)} %</small></span></div>`).join('')}</div></div>`:''}
     ${yr.length?`<div class="summary"><div class="label">Jahresvergleich${stv.all?' · alle Fahrzeuge':''}</div>
-      <div class="ytable"><table><thead><tr><th>Jahr</th><th>km</th><th>Liter</th><th>Ø l/100</th><th>Ø €/l</th><th>Kosten</th><th>€/100 km</th></tr></thead>
-      <tbody>${yr.slice().reverse().map(x=>`<tr${stv.p===x.y?' class="cur"':''}><td>${x.y}</td><td>${x.k?nf(x.k,0):'–'}</td><td>${nf(x.l,0)}</td><td>${x.v!=null?nf(x.v,2):'–'}</td><td>${x.p!=null?nf(x.p,3):'–'}</td><td>${eur0(x.tot)}</td><td>${x.c100!=null?nf(x.c100,2):'–'}</td></tr>`).join('')}</tbody></table></div>
+      <div class="ytable"><table><thead><tr><th>Jahr</th><th>km</th><th>Liter</th><th>Ø l/100</th><th>Ø €/l</th><th>AdBlue</th><th>Kosten</th><th>€/100 km</th></tr></thead>
+      <tbody>${yr.slice().reverse().map(x=>`<tr${stv.p===x.y?' class="cur"':''}><td>${x.y}</td><td>${x.k?nf(x.k,0):'–'}</td><td>${nf(x.l,0)}</td><td>${x.v!=null?nf(x.v,2):'–'}</td><td>${x.p!=null?nf(x.p,3):'–'}</td><td>${x.ad?nf(x.ad,0)+' l':'–'}</td><td>${eur0(x.tot)}</td><td>${x.c100!=null?nf(x.c100,2):'–'}</td></tr>`).join('')}</tbody></table></div>
       <p class="hint">km aus allen Kilometerangaben (Tankungen, Service, km-Meldungen). Angefangene Jahre zählen nur bis zum letzten Eintrag.</p></div>`:''}
     ${tops.length?`<div class="summary"><div class="label">Häufigste Tankstellen</div><div class="list" style="gap:6px">${tops.map(([n,o])=>`<div class="strow" style="cursor:default">${badge(db.stationen.find(s=>s.name===n),n)}<span><b>${esc(n)}</b><small>${o.n}× · ${eur(o.e)}</small></span></div>`).join('')}</div></div>`:''}
     ${fP.length?`<div class="summary"><div class="label">Rekorde im Zeitraum</div><dl class="kv" style="margin:0">

@@ -1,4 +1,8 @@
-# MyTankBox – Test-App 0.13.1.1
+# MyTankBox – Test-App 0.13.2.1
+
+## Neu in 0.13.2
+
+- AdBlue in der Auswertung: eigene Farbe im Kostendiagramm, eigene Karte (Liter, Kosten, Liter je 1.000 km, Ø €/Liter, Liter je Monat/Jahr, letzte Nachfüllung und km seitdem) und Spalte im Jahresvergleich.
 
 ## Neu in 0.13.1
 

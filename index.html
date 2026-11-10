@@ -16,7 +16,7 @@
 /* Layout: eine schmale App-Spalte, Tabs unten wie eine Handy-App, Details als Bottom-Sheet */
 :root{
   --bg:#F3EFEB; --surface:#FFFFFF; --sunk:#EAE4DE; --ink:#231B15; --muted:#6B5F56; --line:#DDD4CC;
-  --accent:#B4530F; --accent-ink:#FFFFFF; --accent-soft:#F6E2D3; --c1:#B4530F; --c2:#0284C7; --c3:#7C3AED;
+  --accent:#B4530F; --accent-ink:#FFFFFF; --accent-soft:#F6E2D3; --c1:#B4530F; --c2:#0284C7; --c3:#7C3AED; --c4:#15803D;
   --warn:#9C560A; --warn-soft:#FBEAD3; --crit:#B3261E; --crit-soft:#F8DDDA; --ok:#2C7536; --ok-soft:#DDEFDD;
   --f-display:system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --f-body:system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -25,12 +25,12 @@
 }
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
   --bg:#15110E; --surface:#211A15; --sunk:#1A1511; --ink:#EEE6DF; --muted:#A99C92; --line:#382D25;
-  --accent:#F29B5C; --accent-ink:#2A1204; --accent-soft:#40261A; --c1:#D9702E; --c2:#0891D1; --c3:#8B5CF6;
+  --accent:#F29B5C; --accent-ink:#2A1204; --accent-soft:#40261A; --c1:#D9702E; --c2:#0891D1; --c3:#8B5CF6; --c4:#22A355;
   --warn:#F0A64B; --warn-soft:#3A2913; --crit:#F2897F; --crit-soft:#3F1C19; --ok:#7DCB88; --ok-soft:#173220;
   color-scheme:dark}}
 :root[data-theme="dark"]{
   --bg:#15110E; --surface:#211A15; --sunk:#1A1511; --ink:#EEE6DF; --muted:#A99C92; --line:#382D25;
-  --accent:#F29B5C; --accent-ink:#2A1204; --accent-soft:#40261A; --c1:#D9702E; --c2:#0891D1; --c3:#8B5CF6;
+  --accent:#F29B5C; --accent-ink:#2A1204; --accent-soft:#40261A; --c1:#D9702E; --c2:#0891D1; --c3:#8B5CF6; --c4:#22A355;
   --warn:#F0A64B; --warn-soft:#3A2913; --crit:#F2897F; --crit-soft:#3F1C19; --ok:#7DCB88; --ok-soft:#173220;
   color-scheme:dark}
 
@@ -838,6 +838,7 @@ a.btn.primary{color:var(--accent-ink)}
 .pchips button{flex:none;padding:8px 14px;border-radius:999px;border:1px solid var(--line);background:var(--surface);color:var(--ink);font:inherit;font-weight:600;font-size:14px;cursor:pointer}
 .pchips button[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
 .kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px}
+.kpis.k4{grid-template-columns:repeat(2,1fr)}
 .kpis>div{background:var(--sunk);border-radius:12px;padding:10px;min-width:0;container-type:inline-size}
 .kpis b{display:block;font-size:clamp(14px,17cqi,20px);font-weight:800;white-space:nowrap}
 .kpis span{display:block;font-size:12px;color:var(--muted);margin-top:2px;line-height:1.25}
