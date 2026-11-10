@@ -1,4 +1,8 @@
-# MyTankBox – Test-App 0.11.0.1
+# MyTankBox – Test-App 0.11.1.1
+
+## Neu in 0.11.1
+
+- „Alte Daten importieren“ korrigiert schon importierte Einträge, wenn die Importdatei geänderte Werte enthält (z. B. AdBlue-Menge), statt sie doppelt anzulegen.
 
 ## Neu in 0.11 – Fahrzeuge und Altdaten
 

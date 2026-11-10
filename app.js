@@ -1,6 +1,6 @@
 (function(){
 'use strict';
-const APP_VERSION='0.11.0.1';
+const APP_VERSION='0.11.1.1';
 /* Eigener Speicher je Adresse: die Live-App unter / behält ihre Namen, eine Test-App unter /test/ bekommt eigene */
 const BASE=location.pathname.replace(/[^/]*$/,'');
 const NS=BASE==='/'?'':BASE.replace(/^\/|\/$/g,'').replace(/[^a-z0-9]+/gi,'-').toLowerCase()+'-';
@@ -948,11 +948,19 @@ async function importOld(o){
   if(o.fahrzeuge.some(x=>x.aktiv))db.fahrzeuge.forEach(f=>{if(!o.fahrzeuge.some(x=>map[x.key]===f.id&&x.aktiv)&&o.fahrzeuge.some(x=>map[x.key]===f.id))f.aktiv=false});
   const key=e=>[e.fz,e.typ||'t',e.datum,e.km||'',Math.round((+e.betrag||0)*100),Math.round((+e.liter||+e.menge||0)*100),e.titel||''].join('|');
   const have=new Set(allAll().map(e=>key(Object.assign({},e,{fz:e.fz||db.fahrzeuge[0].id}))));
-  let nF=0,nS=0,skip=0;
-  for(const e of o.fills||[]){const r=Object.assign({},e,{id:uid(),fz:map[e.fz],created:Date.now(),import:true});if(have.has(key(r))){skip++;continue}have.add(key(r));db.fills.push(r);nF++}
-  for(const e of o.services||[]){const r=Object.assign({},e,{id:uid(),fz:map[e.fz],created:Date.now(),import:true});if(have.has(key(r))){skip++;continue}have.add(key(r));db.services.push(r);nS++}
+  let nF=0,nS=0,skip=0,upd=0;
+  // Schon importierte Einträge mit korrigierten Werten (z. B. AdBlue-Menge) werden aktualisiert statt doppelt angelegt
+  const loose=e=>[e.fz,e.typ||'t',e.datum,e.km||'',Math.round((+e.betrag||0)*100),e.titel||''].join('|');
+  const imported=new Map();allAll().forEach(e=>{if(e.import)imported.set(loose(e),e)});
+  const add=(arr,e,isFill)=>{const r=Object.assign({},e,{id:uid(),fz:map[e.fz],created:Date.now(),import:true});
+    if(have.has(key(r))){skip++;return}
+    const old=imported.get(loose(r));
+    if(old){const ch=Object.keys(e).filter(k=>k!=='fz'&&old[k]!==e[k]);if(ch.length){ch.forEach(k=>old[k]=e[k]);old.updated=Date.now();upd++}else skip++;return}
+    have.add(key(r));arr.push(r);if(isFill)nF++;else nS++};
+  for(const e of o.fills||[])add(db.fills,e,true);
+  for(const e of o.services||[])add(db.services,e,false);
   const akt=o.fahrzeuge.find(x=>x.aktiv);if(akt)db.meta.fz=map[akt.key];
-  await save();return {nF,nS,skip}}
+  await save();return {nF,nS,skip,upd}}
 
 /* ---------- Formular ---------- */
 async function shrink(file){
@@ -1233,7 +1241,7 @@ function openMenu(open){
     s.querySelector('#fzGo').onclick=()=>openFz();
     const impIn=s.querySelector('#impIn');impIn.addEventListener('change',async()=>{const f=impIn.files[0];impIn.value='';if(!f)return;
       let o;try{o=JSON.parse(await f.text())}catch(x){toast('Die Datei lässt sich nicht lesen.');return}
-      try{const r=await importOld(o);closeSheet(false);shown={};render();celebrate('Importiert');toast(`${r.nF} Tankungen und ${r.nS} weitere Einträge übernommen${r.skip?`, ${r.skip} doppelte übersprungen`:''}.`)}catch(x){toast(x.message||'Import hat nicht geklappt.')}});
+      try{const r=await importOld(o);closeSheet(false);shown={};render();celebrate('Importiert');toast(`${r.nF} Tankungen und ${r.nS} weitere Einträge übernommen${r.upd?`, ${r.upd} korrigiert`:''}${r.skip?`, ${r.skip} schon vorhanden`:''}.`)}catch(x){toast(x.message||'Import hat nicht geklappt.')}});
     s.querySelector('#csvGo').onclick=async()=>{if(!allAll().length){toast('Noch keine Einträge.');return}if(await exportCsv())toast('CSV exportiert.')};
     s.querySelector('#del').onclick=async()=>{if(!allAll().length){toast('Es gibt nichts zu löschen.');return}
       if(!confirm('Wirklich alle '+allAll().length+' Einträge und Fotos auf diesem Handy löschen?'))return;
