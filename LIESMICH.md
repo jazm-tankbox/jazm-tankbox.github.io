@@ -1,4 +1,8 @@
-# MyTankBox – Test-App 0.13.0.1
+# MyTankBox – Test-App 0.13.1.1
+
+## Neu in 0.13.1
+
+- „Alte Daten importieren“ ergänzt bei schon importierten Einträgen auch geänderte Felder wie die Kraftstoffart zuverlässig.
 
 ## Neu in 0.13 – TÜV und Inspektion auf einen Blick
 

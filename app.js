@@ -1,6 +1,6 @@
 (function(){
 'use strict';
-const APP_VERSION='0.13.0.1';
+const APP_VERSION='0.13.1.1';
 /* Eigener Speicher je Adresse: die Live-App unter / behält ihre Namen, eine Test-App unter /test/ bekommt eigene */
 const BASE=location.pathname.replace(/[^/]*$/,'');
 const NS=BASE==='/'?'':BASE.replace(/^\/|\/$/g,'').replace(/[^a-z0-9]+/gi,'-').toLowerCase()+'-';
@@ -1130,9 +1130,9 @@ async function importOld(o){
   const loose=e=>[e.fz,e.typ||'t',e.datum,e.km||'',Math.round((+e.betrag||0)*100),e.titel||''].join('|');
   const imported=new Map();allAll().forEach(e=>{if(e.import)imported.set(loose(e),e)});
   const add=(arr,e,isFill)=>{const r=Object.assign({},e,{id:uid(),fz:map[e.fz],created:Date.now(),import:true});
-    if(have.has(key(r))){skip++;return}
     const old=imported.get(loose(r));
     if(old){const ch=Object.keys(e).filter(k=>k!=='fz'&&old[k]!==e[k]);if(ch.length){ch.forEach(k=>old[k]=e[k]);old.updated=Date.now();upd++}else skip++;return}
+    if(have.has(key(r))){skip++;return}
     have.add(key(r));arr.push(r);if(isFill)nF++;else nS++};
   for(const e of o.fills||[])add(db.fills,e,true);
   for(const e of o.services||[])add(db.services,e,false);
