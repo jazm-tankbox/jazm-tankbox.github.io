@@ -1,4 +1,11 @@
-# MyTankBox – Test-App 0.13.2.1
+# MyTankBox – Test-App 0.14.0.1
+
+## Neu in 0.14 – Kilometerstand vor dem Tanken
+
+- Neuer Eintrag im Tanken-Menü: „km-Stand vor dem Tanken“. Die Kamera öffnet sich mit einem breiten Rahmen für die Tacho-Anzeige, die App liest den Kilometerstand aus (bevorzugt eine Zahl knapp über dem letzten km-Stand) und zeigt ihn zum Prüfen. Andere erkannte Zahlen lassen sich antippen.
+- Nach „Merken“ steht oben in der Übersicht „Offener Tankvorgang“ mit „Quittung scannen“, „Ohne Foto“ und „Verwerfen“.
+- Die nächste neue Tankung übernimmt den km-Stand vom Tacho-Foto. Steht auf der Quittung ein anderer Wert, zeigt die App beide; „Quittungswert nehmen“ wechselt.
+- Das Tacho-Foto wird mit der Tankung gespeichert (in den Details unter dem Kilometerstand) und mitgesichert.
 
 ## Neu in 0.13.2
 

@@ -1,6 +1,6 @@
 (function(){
 'use strict';
-const APP_VERSION='0.13.2.1';
+const APP_VERSION='0.14.0.1';
 /* Eigener Speicher je Adresse: die Live-App unter / behält ihre Namen, eine Test-App unter /test/ bekommt eigene */
 const BASE=location.pathname.replace(/[^/]*$/,'');
 const NS=BASE==='/'?'':BASE.replace(/^\/|\/$/g,'').replace(/[^a-z0-9]+/gi,'-').toLowerCase()+'-';
@@ -177,7 +177,7 @@ async function ghSync(force){
   ghBusy=true;clearTimeout(ghTimer);ghTimer=0;setGhStat({});
   try{
     // 1) Fotos, die im Repo noch fehlen (Fotos ändern sich nie, daher reicht der Name)
-    const ids=allAll().map(f=>f.foto).concat(db.stationen.map(x=>x.bild),Object.values(db.meta.brandImgs||{})).filter(Boolean);
+    const ids=fotoIds(db);
     if(ids.length){
       const list=await ghFetch(g,'GET','/contents/fotos');const have=new Set((list||[]).map(x=>String(x.name).replace(/\.jpg$/,'')));
       for(const id of ids){if(have.has(id))continue;const b=await fotoGet(id).catch(()=>null);if(!b)continue;
@@ -211,8 +211,7 @@ document.addEventListener('visibilitychange',()=>{if(document.hidden&&ghTimer)gh
 async function ghRestore(g,onStep){
   const {json}=await ghRemote(g);let o=null;try{o=JSON.parse(json)}catch(e){}
   if(!o||o.app!=='tankbox'||!Array.isArray(o.fills))throw new Error('Im Repo wurde keine MyTankBox-Sicherung gefunden.');
-  const need=o.fills.concat(o.services||[]).map(f=>f.foto).concat((o.stationen||[]).map(x=>x.bild)).filter(Boolean);
-  if(o.meta&&o.meta.brandImgs)need.push(...Object.values(o.meta.brandImgs));let n=0;
+  const need=fotoIds(o);let n=0;
   for(const id of need){onStep&&onStep(++n,need.length);if(await fotoGet(id).catch(()=>null))continue;
     const b=await ghFetch(g,'GET','/contents/fotos/'+encodeURIComponent(id)+'.jpg',null,true).catch(()=>null);
     if(b)await fotoPut(id,new Blob([b],{type:'image/jpeg'}))}
@@ -222,7 +221,7 @@ async function ghRestore(g,onStep){
 
 /* ---------- Sicherungsdatei (zusätzlich oder statt GitHub) ---------- */
 async function exportBackup(){
-  const fotos={};for(const id of allAll().map(f=>f.foto).concat(db.stationen.map(x=>x.bild),Object.values(db.meta.brandImgs||{})).filter(Boolean)){const b=await fotoGet(id).catch(()=>null);if(b)fotos[id]=toB64(await b.arrayBuffer())}
+  const fotos={};for(const id of fotoIds(db)){const b=await fotoGet(id).catch(()=>null);if(b)fotos[id]=toB64(await b.arrayBuffer())}
   const o=JSON.parse(payload());o.exported=new Date().toISOString();o.fotos=fotos;
   const ok=await deliverFile('tankbox-sicherung-'+iso(new Date())+'.tankbox',JSON.stringify(o),'application/json');
   if(ok){db.meta.dirty=0;db.meta.lastBackup=iso(new Date());await save(false,false);bkDot();toast('Sicherung erstellt.')}
@@ -351,6 +350,8 @@ function render(){
   const rm=main.querySelector('[data-bk]');if(rm)rm.onclick=()=>openMenu('gh');
   const nb=main.querySelector('[data-new]');if(nb)nb.onclick=()=>openForm(null,nb.dataset.new==='foto');
   const all=main.querySelector('[data-all]');if(all)all.onclick=()=>goTab('liste');
+  main.querySelectorAll('[data-pend]').forEach(b=>b.onclick=()=>{const k=b.dataset.pend;buzz(6);
+    if(k==='del'){const d=db.meta.draft;dropDraft();toast(`Tankvorgang (${km(d.km)}) verworfen.`)}else openForm(null,k==='scan')});
   countUps(first);first=false;fitFacts();setTimeout(fitFacts,1000);
 }
 /* Zahlen in den Kacheln verkleinern, bis sie hineinpassen */
@@ -359,11 +360,11 @@ function fitFacts(){main.querySelectorAll('.fact b').forEach(b=>{b.style.fontSiz
 addEventListener('resize',()=>{clearTimeout(fitFacts.t);fitFacts.t=setTimeout(fitFacts,150)});
 function viewHome(s){
   const recent=timeline().slice(0,5);
-  if(!VF().length&&!VS().length)return `<section class="view">${db.fahrzeuge.length>1?fzChip():''}
+  if(!VF().length&&!VS().length)return `<section class="view">${db.fahrzeuge.length>1?fzChip():''}${pendHtml()}
     <div class="summary"><div><div class="label">Willkommen</div><p style="margin:6px 0 0">Erfasse jede Tankung des Dienstwagens mit Quittungsfoto. Die MyTankBox rechnet Verbrauch und Kosten aus.</p></div>
     <div class="actions"><button type="button" class="btn primary" data-new="foto">Erste Tankung erfassen</button></div></div>
     ${ghCfg()?'':`<p class="hint">Neues Handy? Unter <b>Daten</b> → Datensicherung → „GitHub einrichten“ holst du deine Tankungen aus GitHub zurück.</p>`}</section>`;
-  return `<section class="view">${DS.remindHtml(bkInfo(),'data-bk')}${fzChip()}${dueTilesHtml()}
+  return `<section class="view">${pendHtml()}${DS.remindHtml(bkInfo(),'data-bk')}${fzChip()}${dueTilesHtml()}
     <div class="summary">
       <div><div class="label">Durchschnittsverbrauch</div><div class="bigcost"><span class="num"${s.avg!=null?` data-count="avg" data-v="${s.avg}" data-f="l1"`:''}>${s.avg!=null?nf(s.avg,1):'–'}</span><small>l/100 km${s.avg==null?' · ab zwei vollen Tankungen':''}</small></div></div>
       <div class="facts">
@@ -535,11 +536,12 @@ function bindStats(){
 async function openDetail(id){
   const f=db.fills.find(x=>x.id===id);if(!f)return;const x=calc()[f.id]||{};
   let url=null;if(f.foto){const b=await fotoGet(f.foto).catch(()=>null);if(b)url=URL.createObjectURL(b)}
+  let kurl=null;if(f.kmFoto){const b=await fotoGet(f.kmFoto).catch(()=>null);if(b)kurl=URL.createObjectURL(b)}
   openSheet(head(fmtS(f.datum)+(f.zeit?' · '+esc(f.zeit):''))+`
     ${x.verb!=null?`<div class="hero h-ok tiltme"><span class="hl">Verbrauch</span><b class="num">${nf(x.verb,1)} l/100 km</b><span class="hs">auf ${km(x.seit)} seit der letzten vollen Tankung</span></div>`:''}
     ${url?`<img class="photo tiltme" src="${url}" alt="Quittung">`:''}
     <dl class="kv">
-      <dt>Kilometerstand</dt><dd class="num">${km(f.km)}${x.dist!=null?` <span class="muted">(+${nf(x.dist,0)})</span>`:''}</dd>
+      <dt>Kilometerstand</dt><dd class="num">${km(f.km)}${x.dist!=null?` <span class="muted">(+${nf(x.dist,0)})</span>`:''}${kurl?`<img class="tachothumb" src="${kurl}" alt="Tacho-Foto vor dem Tanken">`:''}</dd>
       <dt>Getankt</dt><dd class="num">${nf(f.liter,2)} l${f.voll===false?' · teilweise':' · voll'}</dd>
       <dt>Kraftstoff-Betrag</dt><dd class="num">${eur(f.betrag)}</dd>
       ${f.waesche?`<dt>Autowäsche</dt><dd class="num">${eur(f.waesche)}</dd><dt>Quittung gesamt</dt><dd class="num"><b>${eur(fillCost(f))}</b></dd>`:''}
@@ -552,7 +554,7 @@ async function openDetail(id){
   s=>{s.querySelector('#dEdit').onclick=()=>openForm(f.id);
     const dst=s.querySelector('#dSt');if(dst)dst.onclick=()=>openStation(stationFor(f),()=>openDetail(f.id));
     s.querySelector('#dDel').onclick=async()=>{if(!confirm('Diese Tankung löschen? Das Foto wird auf diesem Handy ebenfalls entfernt.'))return;
-      db.fills=db.fills.filter(y=>y.id!==f.id);if(f.foto)fotoDel(f.foto).catch(()=>{});await save();closeSheet();render();toast('Tankung gelöscht.')};
+      db.fills=db.fills.filter(y=>y.id!==f.id);if(f.foto)fotoDel(f.foto).catch(()=>{});if(f.kmFoto)fotoDel(f.kmFoto).catch(()=>{});await save();closeSheet();render();toast('Tankung gelöscht.')};
     const img=s.querySelector('.photo');if(img)img.onclick=()=>window.open(url,'_blank')});
 }
 
@@ -1040,16 +1042,16 @@ async function drawMap(el,st){
    Liefert ein Foto (Blob), auf den Rahmen zugeschnitten. Ohne Kamerazugriff: null → System-Kamera als Ausweg. */
 let scanOpen=null;
 function scanSupported(){return !!(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia)}
-function openScanner(){
+function openScanner(opt={}){
   return new Promise(async resolve=>{
     let stream=null,track=null,torch=false,done=false;
-    const el=document.createElement('div');el.className='rscan';el.setAttribute('role','dialog');el.setAttribute('aria-label','Quittung scannen');
+    const el=document.createElement('div');el.className='rscan';el.setAttribute('role','dialog');el.setAttribute('aria-label',opt.label||'Quittung scannen');
     el.innerHTML=`<video playsinline muted autoplay></video>
-      <div class="rsmask"><div class="rsframe"><i></i><i></i><i></i><i></i></div></div>
+      <div class="rsmask${opt.wide?' wide':''}"><div class="rsframe"><i></i><i></i><i></i><i></i></div></div>
       <div class="rstop"><button type="button" class="rsbtn" data-x aria-label="Abbrechen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
-        <span class="rstxt">Quittung in den Rahmen legen</span>
+        <span class="rstxt">${esc(opt.title||'Quittung in den Rahmen legen')}</span>
         <button type="button" class="rsbtn" data-torch aria-label="Licht" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L4 14h7l-1 8 9-12h-7z"/></svg></button></div>
-      <div class="rsbot"><span class="rshint">Flach hinlegen, von oben, ohne Schatten. Lange Quittungen dürfen über den Rahmen hinausgehen.</span>
+      <div class="rsbot"><span class="rshint">${esc(opt.hint||'Flach hinlegen, von oben, ohne Schatten. Lange Quittungen dürfen über den Rahmen hinausgehen.')}</span>
         <button type="button" class="rsshot" data-shot aria-label="Foto aufnehmen"><span></span></button></div>
       <div class="rsflash"></div>`;
     document.body.appendChild(el);document.body.style.overflow='hidden';
@@ -1090,12 +1092,69 @@ function openScanner(){
   });
 }
 
+/* ---------- Offener Tankvorgang: vor dem Tanken den Tacho fotografieren, danach die Quittung scannen ----------
+   Gemerkt wird in db.meta.draft {fz, km, datum, zeit, foto, t}; die nächste neue Tankung übernimmt den km-Stand. */
+const draftFor=()=>{const d=db.meta.draft;return d&&(!d.fz||d.fz===curFz())?d:null};
+const lastKm=()=>Math.max(0,...VF().map(f=>+f.km||0),...VS().map(v=>+v.km||0));
+function camFile(){return new Promise(res=>{const i=document.createElement('input');i.type='file';i.accept='image/*';i.capture='environment';
+  i.onchange=()=>res(i.files[0]||null);window.addEventListener('focus',()=>setTimeout(()=>{if(!i.files.length)res(null)},1200),{once:true});i.click()})}
+async function openTacho(){
+  let b=null;
+  if(scanSupported()){b=await openScanner({wide:true,label:'Kilometerstand fotografieren',title:'Kilometerstand in den Rahmen',
+      hint:'Zündung an, die Gesamt-km-Anzeige in den Rahmen. Schräg halten, falls sich etwas spiegelt.'});
+    if(b===undefined)return;if(b===null)toast('Kein Kamerazugriff – die Kamera-App wird geöffnet.')}
+  if(!b)b=await camFile();if(!b)return;
+  const img=await shrink(b);if(!img){toast('Dieses Bild lässt sich nicht lesen.');return}
+  const url=URL.createObjectURL(img),min=lastKm(),dr=draftFor();
+  openSheet(head('Kilometerstand vor dem Tanken')+`
+    <img class="photo tacho" src="${url}" alt="Tacho-Foto">
+    <form id="tf" novalidate>
+      <label class="field"><span>Kilometerstand</span><input name="km" inputmode="numeric" required placeholder="${min?'zuletzt '+nf(min,0):'z. B. 48 250'}" autocomplete="off"></label>
+      <div class="kmchips" id="tchips" hidden></div>
+      <p class="hint ocrbusy" id="tocr">Kilometerstand wird gelesen …</p>
+      ${dr?`<p class="hint">Ersetzt den offenen Tankvorgang von ${dr.datum===iso(new Date())?'heute':fmtS(dr.datum)} (${km(dr.km)}).</p>`:''}
+      <div class="note" id="twarn" hidden></div>
+      <div class="actions two"><button type="button" class="btn" data-close>Abbrechen</button><button class="btn primary" id="tsave">Merken</button></div>
+    </form>`,s=>{
+    const fm=s.querySelector('#tf'),inp=fm.elements.km,info=s.querySelector('#tocr'),chips=s.querySelector('#tchips'),warn=s.querySelector('#twarn');
+    s.querySelector('[data-close]').onclick=()=>closeSheet();
+    let touched=false;inp.addEventListener('input',e=>{if(e.isTrusted)touched=true;fm.dataset.ok=''});
+    const setKm=v=>{inp.value=v;inp.closest('.field').classList.add('ocr');buzz(6)};
+    (async()=>{if(!window.TankOCR||!TankOCR.readKm){info.className='hint';info.textContent='Bitte den Kilometerstand eintippen.';return}
+      let r;try{r=await TankOCR.readKm(img,{min})}catch(e){if(!fm.isConnected)return;info.className='hint';
+        info.textContent=navigator.onLine===false||(e&&e.message==='offline')?'Für das erste Auslesen braucht die App einmal Internet. Bitte den Kilometerstand eintippen.':'Auslesen hat nicht geklappt. Bitte den Kilometerstand eintippen.';inp.focus();return}
+      if(!fm.isConnected)return;
+      if(r.km){if(!touched)setKm(r.km);info.className='hint ocrok';info.innerHTML=`<b>Erkannt:</b> ${esc(km(r.km))}. Bitte mit dem Foto vergleichen.`}
+      else{info.className='hint ocrwarn';info.textContent='Kein Kilometerstand erkannt. Bitte eintippen.';inp.focus()}
+      const alt=r.cands.filter(v=>v!==r.km);
+      if(alt.length){chips.hidden=false;chips.innerHTML='<span class="muted">Andere Zahlen auf dem Foto:</span> '+alt.map(v=>`<button type="button" class="chip" data-v="${v}">${esc(nf(v,0))}</button>`).join('');
+        chips.querySelectorAll('[data-v]').forEach(c=>c.onclick=()=>{touched=true;setKm(c.dataset.v)})}})();
+    fm.onsubmit=async e=>{e.preventDefault();const v=Math.round(num(inp.value));
+      if(!(v>0)){inp.closest('.field').classList.add('no');buzz([20,40,20]);toast('Bitte den Kilometerstand eintragen.');return}
+      const w=[];if(min&&v<min)w.push(`Der Wert liegt unter dem letzten Kilometerstand (${km(min)}).`);if(min&&v>min+5000)w.push(`Das sind ${nf(v-min,0)} km seit dem letzten Eintrag – ungewöhnlich viel.`);
+      if(w.length&&!fm.dataset.ok){fm.dataset.ok='1';warn.hidden=false;warn.innerHTML=w.map(esc).join('<br>')+'<br><b>Nochmal „Merken“ tippen, um trotzdem zu speichern.</b>';buzz([20,40,20]);return}
+      const id=uid();await fotoPut(id,img);const old=db.meta.draft;if(old&&old.foto)fotoDel(old.foto).catch(()=>{});
+      const n=new Date();db.meta.draft={fz:curFz(),km:v,datum:iso(n),zeit:String(n.getHours()).padStart(2,'0')+':'+String(n.getMinutes()).padStart(2,'0'),foto:id,t:Date.now()};
+      await save();DS.savedTick(s.querySelector('#tsave'));
+      setTimeout(()=>{closeSheet();URL.revokeObjectURL(url);if(tab!=='home')goTab('home');else render();toast(`Gemerkt: ${km(v)}. Nach dem Tanken die Quittung scannen.`)},motion()?500:0)};
+    if(window.TankOCR)TankOCR.warm&&TankOCR.warm();
+  });
+}
+async function dropDraft(){const d=db.meta.draft;if(!d)return;if(d.foto)fotoDel(d.foto).catch(()=>{});delete db.meta.draft;await save();render()}
+function pendHtml(){const d=draftFor();if(!d)return '';const today=d.datum===iso(new Date());
+  return `<div class="pend" role="status"><div class="pendt"><span class="pendic" aria-hidden="true">${svg('cam','bi')}</span>
+      <div><b>Offener Tankvorgang</b><small><span class="num">${esc(km(d.km))}</span> · Tacho-Foto ${today?'heute':esc(fmtS(d.datum))}${d.zeit?' '+esc(d.zeit):''}</small></div></div>
+    <div class="pendb"><button type="button" class="btn primary" data-pend="scan">${svg('cam','bi')} Quittung scannen</button><button type="button" class="btn" data-pend="hand">Ohne Foto</button><button type="button" class="ghost" data-pend="del">Verwerfen</button></div></div>`}
+
 /* ---------- Fahrzeuge: jede Tankung und jeder Service gehört zu einem Wagen ---------- */
 const curFz=()=>{const f=db.fahrzeuge||[];return (f.find(x=>x.id===db.meta.fz)||f.find(x=>x.aktiv)||f[0]||{}).id};
 const fzOf=id=>(db.fahrzeuge||[]).find(x=>x.id===id);
 const isCur=e=>{const c=curFz();return !c||(e.fz||db.fahrzeuge[0].id)===c};
 const VF=()=>db.fills.filter(isCur),VS=()=>db.services.filter(isCur);
 const allAll=()=>db.fills.concat(db.services);
+/* alle Foto-IDs eines Datenstands: Quittungen, Tacho-Fotos, Tankstellen- und Markenbilder, offener Tankvorgang */
+const fotoIds=o=>[...new Set((o.fills||[]).concat(o.services||[]).flatMap(f=>[f.foto,f.kmFoto]).concat((o.stationen||[]).map(x=>x.bild),
+  Object.values((o.meta&&o.meta.brandImgs)||{}),[o.meta&&o.meta.draft&&o.meta.draft.foto]).filter(Boolean))];
 /* Bezugsdatum: heute – bei einem abgegebenen Wagen der letzte Eintrag bzw. die Abgabe */
 function refDate(){const f=fzOf(curFz());if(!f||!f.bis)return new Date();
   const last=VF().concat(VS()).reduce((m,e)=>e.datum>m?e.datum:m,'');return parse(last&&last<f.bis?last:f.bis)}
@@ -1155,10 +1214,11 @@ async function shrink(file){
   return new Promise(r=>c.toBlob(b=>r(b),'image/jpeg',.82))}
 function openForm(id,withPhoto){
   const old=id?db.fills.find(x=>x.id===id):null;
-  const last=byDate()[0];
+  const last=byDate()[0],dr=old?null:draftFor();
   const now=new Date();
   const f=old?Object.assign({},old):{datum:iso(now),zeit:String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0'),
     sorte:last&&last.sorte||'Diesel',station:'',voll:true};
+  if(dr)f.km=dr.km;
   let newFoto=null,fotoGone=false,previewUrl=null;
   const v=(k,d)=>f[k]==null||f[k]===''||Number.isNaN(f[k])?'':nf(f[k],d).replace(/\./g,'');
   openSheet(head(old?'Tankung bearbeiten':'Neue Tankung')+`
@@ -1172,6 +1232,7 @@ function openForm(id,withPhoto){
       <div class="grid2"><label class="field"><span>Datum</span><input name="datum" type="date" required value="${esc(f.datum)}"></label>
         <label class="field"><span>Uhrzeit</span><input name="zeit" type="time" value="${esc(f.zeit||'')}"></label></div>
       <label class="field"><span>Kilometerstand</span><input name="km" inputmode="numeric" required placeholder="${last?'zuletzt '+nf(last.km,0):'z. B. 48 250'}" value="${f.km!=null?f.km:''}"></label>
+      ${dr?`<p class="hint tachohint" id="ftacho">${svg('cam','bi')} Vom Tacho-Foto ${dr.datum===iso(new Date())?'':esc(fmtS(dr.datum))+' '}${esc(dr.zeit||'')} übernommen.</p>`:''}
       <div class="grid2"><label class="field"><span>Liter</span><input name="liter" inputmode="decimal" required placeholder="45,12" value="${v('liter',2)}"></label>
         <label class="field"><span>Betrag Kraftstoff (€)</span><input name="betrag" inputmode="decimal" required placeholder="78,40" value="${v('betrag',2)}"></label></div>
       <div class="grid2"><label class="field"><span>Autowäsche (€)</span><input name="waesche" inputmode="decimal" placeholder="keine" value="${v('waesche',2)}"></label>
@@ -1205,7 +1266,7 @@ function openForm(id,withPhoto){
       if(b&&fm.isConnected)useFile(b)};
     s.querySelector('#fscan').onclick=scan;
     /* Quittung auslesen: füllt nur Felder, die du noch nicht selbst geändert hast */
-    const touched=new Set(),focr=s.querySelector('#focr');
+    const touched=new Set(dr?['km']:[]),focr=s.querySelector('#focr');
     fm.addEventListener('input',e=>{if(e.isTrusted&&e.target.name)touched.add(e.target.name)});
     let ocrRun=0;
     const ocr=async file=>{if(!window.TankOCR){focr.textContent='Die Texterkennung fehlt in diesem App-Stand.';return}
@@ -1221,6 +1282,9 @@ function openForm(id,withPhoto){
       const fx=(v,d)=>nf(v,d).replace(/\./g,'');const got=[];
       if(put('datum',r.datum))got.push(fmtS(r.datum));put('zeit',r.zeit);
       if(put('km',r.km))got.push(km(r.km));
+      else if(dr&&r.km&&Math.round(num(el.km.value))!==r.km){const th=s.querySelector('#ftacho');
+        if(th){th.className='hint tachohint ocrwarn';th.innerHTML=`${svg('cam','bi')} Übernommen vom Tacho-Foto: <b>${esc(km(Math.round(num(el.km.value))))}</b>. Auf der Quittung steht ${esc(km(r.km))}. <button type="button" class="linkbtn" id="kmRc">Quittungswert nehmen</button>`;
+          th.querySelector('#kmRc').onclick=()=>{el.km.value=r.km;touched.add('km');th.className='hint tachohint';th.innerHTML=`${svg('cam','bi')} Kilometerstand von der Quittung übernommen.`;live()}}}
       if(put('liter',r.liter&&fx(r.liter,2)))got.push(nf(r.liter,2)+' l');
       if(put('ppl',r.ppl&&fx(r.ppl,3)))got.push(nf(r.ppl,3)+' €/l');
       if(put('betrag',r.betrag&&fx(r.betrag,2)))got.push(eur(r.betrag));
@@ -1262,6 +1326,7 @@ function openForm(id,withPhoto){
       if(!(rec.waesche>0))delete rec.waesche;
       if(!rec.adresse)delete rec.adresse;
       rememberStation(rec.station,rec.adresse);
+      if(dr&&db.meta.draft===dr){if(dr.foto)rec.kmFoto=dr.foto;delete db.meta.draft}
       const first=!db.fills.length;if(!old)db.fills.push(rec);
       await save();DS.savedTick(s.querySelector('#fsave'));
       setTimeout(()=>{closeSheet();render();if(first)celebrate('Erste Tankung!');else{const x=calc()[rec.id];toast(x&&x.verb!=null?`Gespeichert · ${nf(x.verb,1)} l/100 km`:'Gespeichert.')}},motion()?500:0)};
@@ -1479,7 +1544,7 @@ function setFan(open){
   else{fan.classList.remove('show');setTimeout(()=>{if(!fanOpen)fan.hidden=true},motion()?260:0)}
 }
 fab.onclick=()=>setFan(!fanOpen);
-fan.addEventListener('click',e=>{const b=e.target.closest('[data-neu]');setFan(false);if(!b)return;if(b.dataset.neu==='service')openSvcForm();else openForm(null,b.dataset.neu==='foto')});
+fan.addEventListener('click',e=>{const b=e.target.closest('[data-neu]');setFan(false);if(!b)return;if(b.dataset.neu==='service')openSvcForm();else if(b.dataset.neu==='tacho')openTacho();else openForm(null,b.dataset.neu==='foto')});
 let lastY=0;addEventListener('scroll',()=>{const y=window.scrollY;if(Math.abs(y-lastY)<8)return;
   fab.classList.toggle('shrunk',y>lastY&&y>120);lastY=y},{passive:true});
 

@@ -150,5 +150,44 @@ async function read(file,progress){
   const [w,canvas]=await Promise.all([worker(),prepare(file)]);
   const {data}=await w.recognize(canvas);
   onProg=null;const r=parse(data.text);r.text=data.text;return r}
-g.TankOCR={read,parse,prepare,lev,streetKey,warm:()=>worker().catch(()=>{})};
+/* ---------- Kilometerstand vom Tacho (vor dem Tanken) ----------
+   Tacho-Anzeigen sind oft helle Ziffern auf dunklem Grund: Graustufen, Kontrast strecken, bei dunklem Bild umkehren.
+   Nur Ziffern erlauben; danach die Einstellungen für Quittungen wiederherstellen. */
+function prepKm(bmp,bin){
+  const sc=Math.min(3,Math.max(1,1800/bmp.width),2400/bmp.width<1?2400/bmp.width:9);
+  const w=Math.round(bmp.width*sc),h=Math.round(bmp.height*sc);
+  const c=document.createElement('canvas');c.width=w;c.height=h;const x=c.getContext('2d',{willReadFrequently:true});
+  x.imageSmoothingQuality='high';x.drawImage(bmp,0,0,w,h);
+  const id=x.getImageData(0,0,w,h),d=id.data,n=w*h,gr=new Float32Array(n),hist=new Uint32Array(256);
+  for(let i=0,p=0;i<n;i++,p+=4){const v=.299*d[p]+.587*d[p+1]+.114*d[p+2];gr[i]=v;hist[v|0]++}
+  const pct=q=>{let a=0;for(let i=0;i<256;i++){a+=hist[i];if(a>=n*q)return i}return 255};
+  const lo=pct(.02),hi=Math.max(lo+1,pct(.98));let sum=0;for(let i=0;i<n;i++)sum+=gr[i];
+  const inv=sum/n<110; // dunkler Hintergrund → umkehren
+  let bg=null;if(bin)bg=boxBlur(gr,w,h,Math.max(8,Math.round(w/60)));
+  for(let i=0,p=0;i<n;i++,p+=4){let v=(gr[i]-lo)/(hi-lo)*255;v=v<0?0:v>255?255:v;if(inv)v=255-v;
+    if(bin){let b=(bg[i]-lo)/(hi-lo)*255;if(inv)b=255-b;v=v<b*.82?0:255}
+    d[p]=d[p+1]=d[p+2]=v;d[p+3]=255}
+  x.putImageData(id,0,0);return c}
+function kmCands(data,min){
+  const lines=data.lines&&data.lines.length?data.lines.map(l=>({t:l.text,h:l.bbox?l.bbox.y1-l.bbox.y0:0})):String(data.text||'').split('\n').map(t=>({t,h:0}));
+  const maxH=Math.max(1,...lines.map(l=>l.h));const out=new Map();
+  for(const l of lines){const t=String(l.t||'').replace(/[^\d ]/g,' ');
+    for(const m of t.matchAll(/\d{1,3}(?: \d{3})+|\d+/g)){const raw=m[0].replace(/ /g,'');
+      if(raw.length<(min>0?4:3)||raw.length>7)continue;const v=+raw;if(!(v>0))continue;
+      let sc=l.h/maxH; // große Ziffern bevorzugen
+      if(min>0){if(v>=min&&v<=min+6000)sc+=3-(v-min)/6000;else if(v>=min-30&&v<min)sc+=1.2;else if(v>min+6000&&v<min+40000)sc+=.4;else sc-=1}
+      else sc+=raw.length>=5&&raw.length<=6?1:0;
+      if(!out.has(v)||out.get(v)<sc)out.set(v,sc)}}
+  return [...out.entries()].sort((a,b)=>b[1]-a[1]).map(([v,s])=>({v,s}))}
+async function readKm(file,opt={}){
+  const w=await worker();const bmp=await createImageBitmap(file);const min=+opt.min||0;let text='',best=[];
+  try{
+    for(const [psm,bin] of [['11',false],['6',true],['7',false]]){
+      await w.setParameters({tessedit_pageseg_mode:psm,tessedit_char_whitelist:'0123456789 '});
+      const {data}=await w.recognize(prepKm(bmp,bin));text+=(text?'\n---\n':'')+(data.text||'');
+      const c=kmCands(data,min);c.forEach(x=>{const o=best.find(y=>y.v===x.v);if(o)o.s=Math.max(o.s,x.s)+.3;else best.push(x)});
+      best.sort((a,b)=>b.s-a.s);if(best[0]&&best[0].s>=(min>0?3:1.5))break}
+  }finally{await w.setParameters({tessedit_pageseg_mode:'4',tessedit_char_whitelist:''}).catch(()=>{})}
+  return {km:best[0]&&best[0].s>0?best[0].v:null,cands:best.filter(x=>x.s>0).slice(0,3).map(x=>x.v),text}}
+g.TankOCR={read,readKm,kmCands,parse,prepare,lev,streetKey,warm:()=>worker().catch(()=>{})};
 })(typeof window!=='undefined'?window:globalThis);
