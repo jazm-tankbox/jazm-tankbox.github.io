@@ -1,6 +1,6 @@
 (function(){
 'use strict';
-const APP_VERSION='0.14.0.1';
+const APP_VERSION='0.14.1.1';
 /* Eigener Speicher je Adresse: die Live-App unter / behält ihre Namen, eine Test-App unter /test/ bekommt eigene */
 const BASE=location.pathname.replace(/[^/]*$/,'');
 const NS=BASE==='/'?'':BASE.replace(/^\/|\/$/g,'').replace(/[^a-z0-9]+/gi,'-').toLowerCase()+'-';
@@ -1078,8 +1078,11 @@ function openScanner(opt={}){
       if(done||!video.videoWidth)return;buzz(12);
       const fl=el.querySelector('.rsflash');if(motion())fl.animate([{opacity:.85},{opacity:0}],{duration:260});
       // Vollauflösung über ImageCapture, sonst Standbild aus dem Video
-      let bmp=null;
-      try{if(window.ImageCapture){const ic=new ImageCapture(track);const b=await ic.takePhoto();bmp=await createImageBitmap(b)}}catch(e){bmp=null}
+      // Das Vollbild-Foto hat auf vielen Handys ein anderes Format (4:3) oder eine andere Ausrichtung als die Vorschau (16:9).
+      // Dann passt der Rahmen nicht mehr → nur verwenden, wenn das Seitenverhältnis stimmt, sonst Standbild aus dem Video.
+      const vv=video.videoWidth/video.videoHeight;let bmp=null;
+      try{if(window.ImageCapture){const ic=new ImageCapture(track);const b=await ic.takePhoto();const t=await createImageBitmap(b);
+        if(Math.abs(t.width/t.height-vv)/vv<.03)bmp=t;else if(t.close)t.close()}}catch(e){bmp=null}
       if(!bmp){try{bmp=await createImageBitmap(video)}catch(e){}}
       if(!bmp){toast('Foto konnte nicht aufgenommen werden.');return}
       // Rahmen (Bildschirm) → Bildkoordinaten; das Video füllt den Schirm „cover“
@@ -1121,11 +1124,16 @@ async function openTacho(){
     let touched=false;inp.addEventListener('input',e=>{if(e.isTrusted)touched=true;fm.dataset.ok=''});
     const setKm=v=>{inp.value=v;inp.closest('.field').classList.add('ocr');buzz(6)};
     (async()=>{if(!window.TankOCR||!TankOCR.readKm){info.className='hint';info.textContent='Bitte den Kilometerstand eintippen.';return}
-      let r;try{r=await TankOCR.readKm(img,{min})}catch(e){if(!fm.isConnected)return;info.className='hint';
-        info.textContent=navigator.onLine===false||(e&&e.message==='offline')?'Für das erste Auslesen braucht die App einmal Internet. Bitte den Kilometerstand eintippen.':'Auslesen hat nicht geklappt. Bitte den Kilometerstand eintippen.';inp.focus();return}
+      let r;try{r=await TankOCR.readKm(img,{min,progress:l=>{if(fm.isConnected)info.textContent=l==='7seg'?'Probiere Segment-Ziffern (beim ersten Mal ca. 11 MB laden) …':'Kilometerstand wird gelesen …'}})}catch(e){if(!fm.isConnected)return;info.className='hint';
+        info.textContent=navigator.onLine===false||(e&&e.message==='offline')?'Für das erste Auslesen braucht die App einmal Internet. Bitte den Kilometerstand eintippen.':'Auslesen hat nicht geklappt ('+String(e&&e.message||e).slice(0,120)+'). Bitte den Kilometerstand eintippen.';inp.focus();return}
       if(!fm.isConnected)return;
       if(r.km){if(!touched)setKm(r.km);info.className='hint ocrok';info.innerHTML=`<b>Erkannt:</b> ${esc(km(r.km))}. Bitte mit dem Foto vergleichen.`}
       else{info.className='hint ocrwarn';info.textContent='Kein Kilometerstand erkannt. Bitte eintippen.';inp.focus()}
+      info.insertAdjacentHTML('beforeend',' <button type="button" class="linkbtn" id="kmTxt">Erkannten Text anzeigen</button>');
+      info.querySelector('#kmTxt').onclick=()=>{let d=document.getElementById('ocrdlg');
+        if(!d){d=document.createElement('dialog');d.id='ocrdlg';d.className='dsdlg';document.body.appendChild(d)}
+        d.innerHTML=`<h2>Erkannte Zahlen</h2><p class="ds-dlg-intro">So hat die Texterkennung das Tacho-Foto gelesen. Schick bei Problemen einen Screenshot davon und das Foto.</p><pre class="ocrpre">${esc(r.text||'(nichts)')}</pre><div class="dsrow"><button type="button" class="ds-btn pri" id="ocrX">Schließen</button></div>`;
+        d.querySelector('#ocrX').onclick=()=>d.close();d.showModal()};
       const alt=r.cands.filter(v=>v!==r.km);
       if(alt.length){chips.hidden=false;chips.innerHTML='<span class="muted">Andere Zahlen auf dem Foto:</span> '+alt.map(v=>`<button type="button" class="chip" data-v="${v}">${esc(nf(v,0))}</button>`).join('');
         chips.querySelectorAll('[data-v]').forEach(c=>c.onclick=()=>{touched=true;setKm(c.dataset.v)})}})();
@@ -1275,7 +1283,7 @@ function openForm(id,withPhoto){
       let r;try{r=await TankOCR.read(file,(st,p)=>{if(run!==ocrRun)return;
           focr.textContent=/recogni/i.test(st)?`Quittung wird gelesen … ${Math.round(p*100)} %`:'Texterkennung wird vorbereitet …'})}
       catch(e){if(run!==ocrRun)return;focr.className='hint';
-        focr.textContent=navigator.onLine===false||(e&&e.message==='offline')?'Für das erste Auslesen braucht die App einmal Internet (lädt die Texterkennung, ca. 10 MB). Danach geht es auch offline.':'Auslesen hat nicht geklappt. Bitte die Werte abtippen.';return}
+        focr.textContent=navigator.onLine===false||(e&&e.message==='offline')?'Für das erste Auslesen braucht die App einmal Internet (lädt die Texterkennung, ca. 10 MB). Danach geht es auch offline.':'Auslesen hat nicht geklappt ('+String(e&&e.message||e).slice(0,120)+'). Bitte die Werte abtippen.';return}
       if(run!==ocrRun||!fm.isConnected)return;
       const el=fm.elements,isNew=!old,put=(k,val)=>{if(val==null||val===''||Number.isNaN(val))return false;const i=el[k];if(!i||touched.has(k))return false;
         if(i.value&&!(isNew&&(k==='datum'||k==='zeit'||k==='sorte')))return false;i.value=val;i.closest('.field,.check')?.classList.add('ocr');return true};

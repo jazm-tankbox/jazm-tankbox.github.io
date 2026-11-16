@@ -1,4 +1,10 @@
-# MyTankBox – Test-App 0.14.0.1
+# MyTankBox – Test-App 0.14.1.1
+
+## Neu in 0.14.1 – Auslesen repariert
+
+- Kamera-Scanner: Auf vielen Handys hat das Vollbild-Foto ein anderes Format als die Vorschau. Dadurch wurde ein falscher Bildausschnitt ausgeschnitten, und weder Quittung noch Tacho waren lesbar. Jetzt wird bei abweichendem Format das Bild aus der Vorschau genommen.
+- Tacho: eigene Texterkennung nur für Ziffern, die die Quittungs-Erkennung nicht mehr verstellt. Zwei Stufen: normale Schrift (TFT-Display), danach Leuchtsegment-Ziffern (lädt beim ersten Mal ca. 11 MB). Die passende Stufe merkt sich die App.
+- „Erkannten Text anzeigen“ auch beim Tacho, Fehlermeldungen nennen den Grund.
 
 ## Neu in 0.14 – Kilometerstand vor dem Tanken
 

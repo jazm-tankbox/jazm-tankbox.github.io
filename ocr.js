@@ -153,20 +153,20 @@ async function read(file,progress){
 /* ---------- Kilometerstand vom Tacho (vor dem Tanken) ----------
    Tacho-Anzeigen sind oft helle Ziffern auf dunklem Grund: Graustufen, Kontrast strecken, bei dunklem Bild umkehren.
    Nur Ziffern erlauben; danach die Einstellungen für Quittungen wiederherstellen. */
-function prepKm(bmp,bin){
-  const sc=Math.min(3,Math.max(1,1800/bmp.width),2400/bmp.width<1?2400/bmp.width:9);
+function prepKm(bmp,mode){ // mode: 0 = Graustufen, 1 = Schwelle, 2 = weichzeichnen + Schwelle (verbindet Segmentziffern)
+  const sc=Math.min(4,Math.max(1,1800/bmp.width),bmp.width>2400?2400/bmp.width:9);
   const w=Math.round(bmp.width*sc),h=Math.round(bmp.height*sc);
   const c=document.createElement('canvas');c.width=w;c.height=h;const x=c.getContext('2d',{willReadFrequently:true});
   x.imageSmoothingQuality='high';x.drawImage(bmp,0,0,w,h);
-  const id=x.getImageData(0,0,w,h),d=id.data,n=w*h,gr=new Float32Array(n),hist=new Uint32Array(256);
+  const id=x.getImageData(0,0,w,h),d=id.data,n=w*h,hist=new Uint32Array(256);let gr=new Float32Array(n);
   for(let i=0,p=0;i<n;i++,p+=4){const v=.299*d[p]+.587*d[p+1]+.114*d[p+2];gr[i]=v;hist[v|0]++}
   const pct=q=>{let a=0;for(let i=0;i<256;i++){a+=hist[i];if(a>=n*q)return i}return 255};
-  const lo=pct(.02),hi=Math.max(lo+1,pct(.98));let sum=0;for(let i=0;i<n;i++)sum+=gr[i];
-  const inv=sum/n<110; // dunkler Hintergrund → umkehren
-  let bg=null;if(bin)bg=boxBlur(gr,w,h,Math.max(8,Math.round(w/60)));
-  for(let i=0,p=0;i<n;i++,p+=4){let v=(gr[i]-lo)/(hi-lo)*255;v=v<0?0:v>255?255:v;if(inv)v=255-v;
-    if(bin){let b=(bg[i]-lo)/(hi-lo)*255;if(inv)b=255-b;v=v<b*.82?0:255}
-    d[p]=d[p+1]=d[p+2]=v;d[p+3]=255}
+  const lo=pct(.02),hi=Math.max(lo+1,pct(.98)),med=pct(.5);
+  const inv=med<(lo+hi)/2; // überwiegend dunkel → helle Ziffern auf dunklem Grund → umkehren
+  for(let i=0;i<n;i++){let v=(gr[i]-lo)/(hi-lo)*255;v=v<0?0:v>255?255:v;gr[i]=inv?255-v:v}
+  if(mode===2)gr=boxBlur(gr,w,h,Math.max(2,Math.round(w/400)));
+  const bg=mode?boxBlur(gr,w,h,Math.max(10,Math.round(w/25))):null;
+  for(let i=0,p=0;i<n;i++,p+=4){const v=mode?(gr[i]<bg[i]*.8?0:255):gr[i];d[p]=d[p+1]=d[p+2]=v;d[p+3]=255}
   x.putImageData(id,0,0);return c}
 function kmCands(data,min){
   const lines=data.lines&&data.lines.length?data.lines.map(l=>({t:l.text,h:l.bbox?l.bbox.y1-l.bbox.y0:0})):String(data.text||'').split('\n').map(t=>({t,h:0}));
@@ -179,15 +179,38 @@ function kmCands(data,min){
       else sc+=raw.length>=5&&raw.length<=6?1:0;
       if(!out.has(v)||out.get(v)<sc)out.set(v,sc)}}
   return [...out.entries()].sort((a,b)=>b[1]-a[1]).map(([v,s])=>({v,s}))}
+/* Eigene Worker nur für Ziffern (die Einstellungen für Quittungen bleiben unberührt):
+   'deu' für Tachos mit normaler Schrift (TFT-Display), '7seg' für Leuchtsegment-Ziffern.
+   7seg: tessdata_ssd von Shreeshrii (Apache-2.0), wird nur bei Bedarf geladen (ca. 11 MB, danach im Cache).
+   Welche Variante beim Wagen funktioniert hat, merkt sich die App und probiert sie beim nächsten Mal zuerst. */
+const SEG_PATH='https://cdn.jsdelivr.net/gh/Shreeshrii/tessdata_ssd@e493a10a4bf81632506cf24ba99d83854afff9f6';
+const kmW={},kmT={};
+function kmWorker(lang){if(kmW[lang])return kmW[lang];
+  kmW[lang]=(async()=>{const T=await lib();let last;
+    const paths=lang==='7seg'?[SEG_PATH]:LANGS;
+    for(const langPath of paths){try{
+      const w=await T.createWorker(lang,1,Object.assign({},OPTS,{langPath},lang==='7seg'?{gzip:false}:{}));
+      await w.setParameters({tessedit_char_whitelist:'0123456789'});return w}catch(e){last=e}}
+    throw last||new Error('offline')})();
+  kmW[lang].catch(()=>{kmW[lang]=null});return kmW[lang]}
+function kmIdle(lang){clearTimeout(kmT[lang]);kmT[lang]=setTimeout(async()=>{const p=kmW[lang];kmW[lang]=null;if(p){try{(await p).terminate()}catch(e){}}},90000)}
+const PASSES={deu:[['6',1],['11',2],['7',2]],'7seg':[['7',2],['6',2],['11',1]]};
+const prefKey='tankbox-kmocr';
 async function readKm(file,opt={}){
-  const w=await worker();const bmp=await createImageBitmap(file);const min=+opt.min||0;let text='',best=[];
-  try{
-    for(const [psm,bin] of [['11',false],['6',true],['7',false]]){
-      await w.setParameters({tessedit_pageseg_mode:psm,tessedit_char_whitelist:'0123456789 '});
-      const {data}=await w.recognize(prepKm(bmp,bin));text+=(text?'\n---\n':'')+(data.text||'');
-      const c=kmCands(data,min);c.forEach(x=>{const o=best.find(y=>y.v===x.v);if(o)o.s=Math.max(o.s,x.s)+.3;else best.push(x)});
-      best.sort((a,b)=>b.s-a.s);if(best[0]&&best[0].s>=(min>0?3:1.5))break}
-  }finally{await w.setParameters({tessedit_pageseg_mode:'4',tessedit_char_whitelist:''}).catch(()=>{})}
+  const bmp=await createImageBitmap(file);const min=+opt.min||0,good=min>0?3:1.6;let text='',best=[],used='',err=null;
+  let pref='deu';try{pref=localStorage.getItem(prefKey)||'deu'}catch(e){}
+  const order=pref==='7seg'?['7seg','deu']:['deu','7seg'];
+  for(const lang of order){let w;
+    try{opt.progress&&opt.progress(lang);w=await kmWorker(lang)}catch(e){err=e;continue}
+    try{for(const [psm,mode] of PASSES[lang]){
+        await w.setParameters({tessedit_pageseg_mode:psm});
+        const {data}=await w.recognize(prepKm(bmp,mode));text+=(text?'\n':'')+'['+lang+'/'+psm+'] '+((data.text||'').trim().replace(/\s*\n\s*/g,' / ')||'–');
+        kmCands(data,min).forEach(x=>{const o=best.find(y=>y.v===x.v);if(o)o.s=Math.max(o.s,x.s)+.3;else best.push(x);x.lang=x.lang||lang});
+        best.sort((a,b)=>b.s-a.s);if(best[0]&&best[0].s>=good){used=lang;break}}}
+    catch(e){err=e}finally{kmIdle(lang)}
+    if(used)break}
+  if(used){try{localStorage.setItem(prefKey,used)}catch(e){}}
+  if(!best.length&&err&&!text)throw err;
   return {km:best[0]&&best[0].s>0?best[0].v:null,cands:best.filter(x=>x.s>0).slice(0,3).map(x=>x.v),text}}
-g.TankOCR={read,readKm,kmCands,parse,prepare,lev,streetKey,warm:()=>worker().catch(()=>{})};
+g.TankOCR={read,readKm,kmCands,prepKm,parse,prepare,lev,streetKey,warm:()=>worker().catch(()=>{})};
 })(typeof window!=='undefined'?window:globalThis);
