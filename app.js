@@ -1,6 +1,6 @@
 (function(){
 'use strict';
-const APP_VERSION='0.14.4.1';
+const APP_VERSION='0.14.5.1';
 /* Eigener Speicher je Adresse: die Live-App unter / behält ihre Namen, eine Test-App unter /test/ bekommt eigene */
 const BASE=location.pathname.replace(/[^/]*$/,'');
 const NS=BASE==='/'?'':BASE.replace(/^\/|\/$/g,'').replace(/[^a-z0-9]+/gi,'-').toLowerCase()+'-';
@@ -1044,6 +1044,8 @@ async function drawMap(el,st){
    Liefert ein Foto (Blob), auf den Rahmen zugeschnitten. Ohne Kamerazugriff: null → System-Kamera als Ausweg. */
 let scanOpen=null;
 function scanSupported(){return !!(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia)}
+/* Kamera: standardmäßig die Kamera-App des Handys (schärfere Fotos: Fokus, Nachschärfen, HDR); App-Scanner mit Rahmen wählbar */
+const useAppScan=()=>db.meta.cam==='app'&&scanSupported();
 function openScanner(opt={}){
   return new Promise(async resolve=>{
     let stream=null,track=null,torch=false,done=false;
@@ -1119,7 +1121,7 @@ function camFile(){return new Promise(res=>{const i=document.createElement('inpu
   i.onchange=()=>res(i.files[0]||null);window.addEventListener('focus',()=>setTimeout(()=>{if(!i.files.length)res(null)},1200),{once:true});i.click()})}
 async function openTacho(){
   let b=null;
-  if(scanSupported()){b=await openScanner({wide:true,label:'Kilometerstand fotografieren',title:'Kilometerstand in den Rahmen',
+  if(useAppScan()){b=await openScanner({wide:true,label:'Kilometerstand fotografieren',title:'Kilometerstand in den Rahmen',
       hint:'Zündung an, die Gesamt-km-Anzeige in den Rahmen. Schräg halten, falls sich etwas spiegelt.'});
     if(b===undefined)return;if(b===null)toast('Kein Kamerazugriff – die Kamera-App wird geöffnet.')}
   if(!b)b=await camFile();if(!b)return;
@@ -1249,7 +1251,7 @@ function openForm(id,withPhoto){
     <form id="ff" novalidate>
       <div class="field"><span>Quittung</span>
         <div class="fotobox" id="fbox">${f.foto?'<span class="muted">Foto vorhanden</span>':''}</div>
-        <div class="actions"><button type="button" class="btn${old||f.foto?'':' primary'}" id="fscan">${svg('cam','bi')} ${f.foto?'Neu scannen':'Quittung scannen'}</button><input id="fcam" type="file" accept="image/*" capture="environment" hidden>
+        <div class="actions"><button type="button" class="btn${old||f.foto?'':' primary'}" id="fscan">${svg('cam','bi')} ${f.foto?'Neues Foto':'Quittung fotografieren'}</button><input id="fcam" type="file" accept="image/*" capture="environment" hidden>
           <label class="btn">Aus Galerie<input id="fgal" type="file" accept="image/*" hidden></label>
           <button type="button" class="btn" id="frm"${f.foto?'':' hidden'}>Foto entfernen</button></div>
         <p class="hint" id="focr">Nach dem Foto liest die App die Quittung automatisch aus, inklusive Autowäsche und Kilometerstand.</p></div>
@@ -1284,7 +1286,7 @@ function openForm(id,withPhoto){
       const b=await shrink(file);if(!b){toast('Dieses Bild lässt sich nicht lesen.');showFoto();return}newFoto=b;fotoGone=false;await showFoto();buzz(6);
       ocr(file)};
     const pick=inp=>{const file=inp.files[0];inp.value='';useFile(file)};
-    const scan=async()=>{if(!scanSupported()){s.querySelector('#fcam').click();return}
+    const scan=async()=>{if(!useAppScan()){s.querySelector('#fcam').click();return}
       const b=await openScanner();
       if(b===null){toast('Kein Kamerazugriff – die Kamera-App wird geöffnet.');s.querySelector('#fcam').click();return}
       if(b&&fm.isConnected)useFile(b)};
@@ -1469,6 +1471,10 @@ function openMenu(open){
     <div class="ds-acts"><button type="button" class="ds-btn pri" id="up_chg">GitHub verbinden</button></div>`}
     <div id="updStatus" class="ds-box"${UPD?'':' hidden'}>${UPD}</div>`,!!UPD)
   +mAcc('stat','pump','Tankstellen',db.stationen.length+' gemerkt · Abzeichen & Bilder',`<p class="ds-hint">Tippe eine Tankstelle an, um Name, Farbe oder ein eigenes Bild (z. B. Foto vom Schild) festzulegen.</p>${stationsHtml()}${brandsHtml()}${cardBrandsHtml()}`)
+  +mAcc('cam','sun','Kamera',db.meta.cam==='app'?'App-Scanner mit Rahmen':'Kamera-App des Handys',`<div class="ds-lbl">Fotos von Quittung und Tacho</div>
+      <label class="check"><input type="radio" name="camSel" value="native"${db.meta.cam==='app'?'':' checked'}> Kamera-App des Handys <span class="muted">(empfohlen – schärfere Fotos)</span></label>
+      <label class="check"><input type="radio" name="camSel" value="app"${db.meta.cam==='app'?' checked':''}> App-Scanner mit Rahmen</label>
+      <p class="ds-hint">Der App-Scanner bekommt vom Browser nur ein ungeschärftes Kamerabild; auf vielen Handys ist das für die Texterkennung zu weich.</p>`)
   +mAcc('look','sun','Darstellung',({auto:'Automatisch',light:'Hell',dark:'Dunkel'})[DS.getTheme()]+' · hell oder dunkel',`<div class="ds-lbl">Hell oder dunkel</div>${DS.themeHtml()}`)
   +mAcc('eintr','list','Einträge',db.fills.length+' Tankung'+(db.fills.length===1?'':'en')+(db.services.length?' · '+db.services.length+' Service':''),`
     <p class="ds-hint">Alte Daten (z. B. aus deiner Excel-Tabelle umgewandelt) hinzufügen. Vorhandene Einträge bleiben, Doppelte werden übersprungen.</p>
@@ -1479,6 +1485,7 @@ function openMenu(open){
   +`<div class="ds-lbl">Meine Boxen</div>${DS.boxesHtml()}<p class="ds-ver">MyTankBox · Version ${APP_VERSION}${IS_TEST?' · Test-App, eigener Speicher':''}</p>`,
   s=>{s.querySelectorAll('details.acc[data-acc]').forEach(d=>d.addEventListener('toggle',()=>{if(d.open){menuAcc=d.dataset.acc;
        s.querySelectorAll('details.acc[open]').forEach(o=>{if(o!==d)o.open=false});buzz(4)}else if(menuAcc===d.dataset.acc)menuAcc=null}));
+    s.querySelectorAll('[name=camSel]').forEach(r=>r.onchange=async()=>{if(r.value==='app')db.meta.cam='app';else delete db.meta.cam;await save();buzz(4);toast(r.value==='app'?'App-Scanner mit Rahmen aktiv.':'Kamera-App des Handys aktiv.')});
     const ghS=s.querySelector('#ghSetup');
     if(ghS)ghS.onclick=()=>dsForm('GitHub-Sicherung einrichten',[{k:'owner',l:'Konto / Organisation',req:true,v:'jazm-tankbox'},{k:'repo',l:'Privates Repo',req:true,v:'tankbox-daten'},{k:'dir',l:'Ordner im Repo (optional, z. B. tankbox)',v:''},{k:'token',l:'Zugangsschlüssel (github_pat_…)',t:'password',req:true}],async(v,fail)=>{
       const g={owner:v.owner.trim(),repo:v.repo.trim(),token:v.token.trim()};const dd=bkDir(v.dir);if(dd)g.dir=dd;

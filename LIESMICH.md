@@ -1,4 +1,10 @@
-# MyTankBox – Test-App 0.14.4.1
+# MyTankBox – Test-App 0.14.5.1
+
+## Neu in 0.14.5 – Fotos mit der Kamera-App
+
+- „Quittung fotografieren“ und „km-Stand vor dem Tanken“ öffnen jetzt die Kamera-App des Handys. Deren Fotos sind deutlich schärfer (Fokus, Nachschärfen, HDR) als das Kamerabild, das der Browser dem App-Scanner liefert – damit scheiterte die Texterkennung.
+- Der App-Scanner mit Rahmen bleibt wählbar: Menü → Kamera.
+- Texterkennung probiert weitere Varianten, bis Datum, Liter und Betrag oder km gefunden sind, statt nach Wortfetzen aufzuhören.
 
 ## Neu in 0.14.4 – Scanner mit voller Auflösung
 

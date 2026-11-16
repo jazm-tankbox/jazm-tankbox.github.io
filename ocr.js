@@ -158,14 +158,14 @@ function prepare(bmp,opt={}){
     const rat=new Uint8ClampedArray(n),hist=new Uint32Array(256);
     for(let y=0;y<h;y++){const by=Math.min(bh-1,y/k|0)*bw;for(let xq=0;xq<w;xq++){const i=y*w+xq;const v=gr[i]/(bg[by+Math.min(bw-1,xq/k|0)]+1)*255;rat[i]=v;hist[rat[i]]++}}
     let thr=200,acc=0;for(let t=0;t<=thr;t++)acc+=hist[t];
-    if(acc<n*.03){acc=0;for(let t=0;t<256;t++){acc+=hist[t];if(acc>=n*.06){thr=Math.min(242,Math.max(200,t));break}}}
+    if(acc<n*.03){acc=0;for(let t=0;t<256;t++){acc+=hist[t];if(acc>=n*.06){thr=Math.min(225,Math.max(200,t));break}}}
     info.thr=thr;
     for(let i=0,p=0;i<n;i++,p+=4){const v=rat[i]>thr?255:0;if(!v)black++;d[p]=d[p+1]=d[p+2]=v;d[p+3]=255}
     info.black=Math.round(black/n*1000)/10}
   x.putImageData(id,0,0);return {canvas:c,info}}
 /* Wie brauchbar ist ein Ergebnis? Gefundene Werte + echte Wörter */
 function quality(r){const words=(String(r.text||'').match(/[A-Za-zÄÖÜäöüß]{4,}/g)||[]).filter(t=>/[aeiouäöüy]/i.test(t)).length;
-  return (r.datum?3:0)+(r.liter?3:0)+(r.betrag?3:0)+(r.km?2:0)+(r.plz?2:0)+Math.min(10,words/3)}
+  return (r.datum?3:0)+(r.liter?3:0)+(r.betrag?3:0)+(r.km?2:0)+(r.plz?2:0)+(r.zeit?1:0)+Math.min(4,words/6)}
 
 /* ---------- Erkennung ---------- */
 let libP=null,workerP=null;
@@ -190,7 +190,7 @@ async function read(file,progress){
       const {canvas,info}=prepare(bmp,tries[t]);if(info.blank){log.push(info);continue}
       const {data}=await w.recognize(canvas);const r=parse(data.text);r.text=data.text;r.q=quality(r);info.q=Math.round(r.q*10)/10;log.push(info);
       if(!best||r.q>best.q){best=r;best.img=canvas}
-      if(best.q>=8)break}}
+      if(best.datum&&best.liter&&(best.betrag||best.km))break}}
   finally{onProg=null}
   if(!best){best=parse('');best.text='';best.q=0}
   best.diag=log.map(i=>`${i.rot?i.rot+'° ':''}${i.plain?'grau ':''}${i.w}×${i.h}${i.blank?' LEER (Bild einfarbig, Helligkeit '+i.mean+')':' · Kontrast '+i.range+(i.black!=null?' · '+i.black+' % schwarz (Schwelle '+i.thr+')':'')+(i.src?' · Foto '+i.src:'')+' · Güte '+i.q}`).join('\n');
