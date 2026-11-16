@@ -42,7 +42,7 @@ const amts=l=>[...l.matchAll(AMT)].map(m=>parseFloat(m[1]+'.'+m[2]));
 const lastAmt=l=>{const a=amts(l);return a.length?a[a.length-1]:NaN};
 function parse(text){
   // „l“ wird oft als „]“ gelesen: hinter Buchstaben (Diese] → Diesel) und als Einheit hinter Litern (56,92] → 56,92 l)
-  const lines=String(text||'').split(/\r?\n/).map(l=>l.replace(/[|]/g,' ').replace(/([A-Za-zäöüß])\](?=\s|$|[.,])/g,'$1l').replace(/(\d[,.]\d{2})\s?[\]\[](?=\s|$|\*)/g,'$1 l').replace(/\s+/g,' ').trim()).filter(Boolean);
+  const lines=String(text||'').split(/\r?\n/).map(l=>l.replace(/(\d[,.]\d{2})\s?\|/g,'$1 l').replace(/[|]/g,' ').replace(/([A-Za-zäöüß])\](?=\s|$|[.,])/g,'$1l').replace(/(\d[,.]\d{2})\s?[\]\[](?=\s|$|\*)/g,'$1 l').replace(/\s+/g,' ').trim()).filter(Boolean);
   const r={},why={};
   /* Datum & Uhrzeit: erstes plausibles Datum */
   for(const l of lines){const m=l.match(/(?<!\d)([0-3]?\d)\s?[.,]\s?([01]?\d)\s?[.,]\s?(20\d\d|\d\d)(?!\d)/);
@@ -64,6 +64,12 @@ function parse(text){
   if(!r.liter)for(const l of lines){const m=l.match(/(\d{1,3})\s?[,.]\s?(\d{2})\s?(?:l|ltr|liter)\b/i);if(m){r.liter=parseFloat(m[1]+'.'+m[2]);break}}
   // Lieferschein (Tankkarte): Zapfpunkt-Zeile „Zp 03  56,92 l“, Liter mit „1“ statt „l“ am Ende
   if(!r.liter)for(const l of lines){const m=l.match(/\bz[pf]\s?\d{1,2}\b.*?(\d{1,3})\s?[,.]\s?(\d{2})(?:\s?[l1iI]\b|\s|$)/i);if(m){const v=parseFloat(m[1]+'.'+m[2]);if(v>=1&&v<=200){r.liter=v;break}}}
+  // Lieferschein: Liter stehen in der Zeile nach der Kraftstoffsorte („*000005 Diesel FuelSave“ → „*Zp 03  56,92 l“)
+  if(!r.liter)for(let i=0;i<lines.length-1;i++){if(!/diesel|super|benzin|e10|e5|v-?power|ultimate|excellium|fuelsave|premium/i.test(lines[i]))continue;
+    for(const l of lines.slice(i,i+3)){if(/eur|€|\/\s?[l1i]\b|summe|betrag/i.test(l))continue;const m=l.match(/(?<![\d,.])(\d{1,3})\s?[,.]\s?(\d{2})(?![\d,.])/);if(m){const v=parseFloat(m[1]+'.'+m[2]);if(v>=3&&v<=200){r.liter=v;break}}}
+    if(r.liter)break}
+  // zuletzt: Zahl mit 2 Nachkommastellen und einem „l“-ähnlichen Zeichen dahinter (l, 1, I, ], „1]“)
+  if(!r.liter)for(const l of lines){if(/eur|€|\/\s?[l1i]/i.test(l))continue;const m=l.match(/(?<![\d,.])(\d{1,3})\s?[,.]\s?(\d{2})\s?(?:[l1iI\]\[|]{1,2})(?=\s|$|[*+x])/);if(m){const v=parseFloat(m[1]+'.'+m[2]);if(v>=3&&v<=200){r.liter=v;break}}}
   /* Kraftstoff + Betrag */
   const FUEL=[['Premium-Diesel',/(ultimate|v-?power|excellium|supreme|premium|ultra)\s?diese/i],['Diesel',/diese[l1i\]]?/i],['Super Plus',/super\s?(plus|\+|98|100)/i],
     ['Super E10',/e\s?10/i],['Super E5',/super|e\s?5\b|benzin|95/i],['LPG',/\blpg|autogas/i]];
@@ -124,18 +130,33 @@ function boxBlur(src,w,h,rad){ // separabler Kastenfilter, zweimal = annähernd 
     for(let k=-rad;k<=rad;k++)s+=a[o+Math.min(W-1,Math.max(0,k))*stepI];
     for(let i=0;i<W;i++){b[o+i*stepI]=s/n;const add=Math.min(W-1,i+rad+1),sub=Math.max(0,i-rad);s+=a[o+add*stepI]-a[o+sub*stepI]}}};
   pass(src,tmp,w,h,1,w);pass(tmp,out,h,w,w,1);pass(out,tmp,w,h,1,w);pass(tmp,out,h,w,w,1);return out}
-async function prepare(file){
-  const bmp=await createImageBitmap(file);
-  // Ziel: Bildbreite um 2400–3000 px (wie im Test), sehr große Fotos nicht noch größer machen
-  const sc=Math.min(3,Math.max(1,2600/bmp.width),4000*4000/(bmp.width*bmp.height)<1?Math.sqrt(16e6/(bmp.width*bmp.height)):9);
-  const w=Math.round(bmp.width*sc),h=Math.round(bmp.height*sc);
+async function loadBmp(file){try{return await createImageBitmap(file,{imageOrientation:'from-image'})}catch(e){return await createImageBitmap(file)}}
+/* Aufbereitung, sparsam im Speicher (Handys liefern bei zu großen Bildern sonst stillschweigend ein leeres Bild):
+   höchstens ca. 9 Mio. Pixel, Hintergrund auf 1/4 verkleinert berechnen.
+   opt.rot: Drehung in Grad, opt.plain: nur Graustufen (Tesseract binarisiert selbst). Liefert {canvas, info}. */
+function prepare(bmp,opt={}){
+  const rot=opt.rot||0,sw=rot%180?bmp.height:bmp.width,sh=rot%180?bmp.width:bmp.height;
+  let sc=Math.min(3,Math.max(1,2400/sw));if(sw*sc*sh*sc>9e6)sc=Math.sqrt(9e6/(sw*sh));
+  const w=Math.max(1,Math.round(sw*sc)),h=Math.max(1,Math.round(sh*sc));
   const c=document.createElement('canvas');c.width=w;c.height=h;const x=c.getContext('2d',{willReadFrequently:true});
-  x.imageSmoothingQuality='high';x.drawImage(bmp,0,0,w,h);
-  const id=x.getImageData(0,0,w,h),d=id.data,gr=new Float32Array(w*h);
-  for(let i=0,p=0;i<gr.length;i++,p+=4)gr[i]=.299*d[p]+.587*d[p+1]+.114*d[p+2];
-  const bg=boxBlur(gr,w,h,Math.max(8,Math.round(w/120)));
-  for(let i=0,p=0;i<gr.length;i++,p+=4){const v=gr[i]/(bg[i]+1)*255>200?255:0;d[p]=d[p+1]=d[p+2]=v;d[p+3]=255}
-  x.putImageData(id,0,0);return c}
+  x.fillStyle='#fff';x.fillRect(0,0,w,h);x.imageSmoothingQuality='high';
+  x.save();x.translate(w/2,h/2);x.rotate(rot*Math.PI/180);const dw=bmp.width*sc,dh=bmp.height*sc;x.drawImage(bmp,-dw/2,-dh/2,dw,dh);x.restore();
+  const id=x.getImageData(0,0,w,h),d=id.data,n=w*h;
+  const gr=new Uint8ClampedArray(n);let mn=255,mx=0,sum=0;
+  for(let i=0,p=0;i<n;i++,p+=4){const v=(77*d[p]+150*d[p+1]+29*d[p+2])>>8;gr[i]=v;sum+=v;if(v<mn)mn=v;if(v>mx)mx=v}
+  const info={w,h,rot,plain:!!opt.plain,mean:Math.round(sum/n),range:mx-mn};
+  if(info.range<20){info.blank=true;return {canvas:c,info}} // Bild leer/einfarbig → Aufbereitung sinnlos
+  let black=0;
+  if(opt.plain){for(let i=0,p=0;i<n;i++,p+=4){d[p]=d[p+1]=d[p+2]=gr[i];d[p+3]=255}}
+  else{const k=4,bw=Math.ceil(w/k),bh=Math.ceil(h/k),small=new Float32Array(bw*bh);
+    for(let yy=0;yy<bh;yy++)for(let xx=0;xx<bw;xx++){let s=0,m=0;for(let j=0;j<k;j++){const y=yy*k+j;if(y>=h)break;for(let i2=0;i2<k;i2++){const xq=xx*k+i2;if(xq>=w)break;s+=gr[y*w+xq];m++}}small[yy*bw+xx]=s/m}
+    const bg=boxBlur(small,bw,bh,Math.max(2,Math.round(bw/120)));
+    for(let y=0;y<h;y++){const by=Math.min(bh-1,y/k|0)*bw;for(let xq=0;xq<w;xq++){const i=y*w+xq,p=i*4;const v=gr[i]/(bg[by+Math.min(bw-1,xq/k|0)]+1)*255>200?255:0;if(!v)black++;d[p]=d[p+1]=d[p+2]=v;d[p+3]=255}}
+    info.black=Math.round(black/n*1000)/10}
+  x.putImageData(id,0,0);return {canvas:c,info}}
+/* Wie brauchbar ist ein Ergebnis? Gefundene Werte + echte Wörter */
+function quality(r){const words=(String(r.text||'').match(/[A-Za-zÄÖÜäöüß]{4,}/g)||[]).filter(t=>/[aeiouäöüy]/i.test(t)).length;
+  return (r.datum?3:0)+(r.liter?3:0)+(r.betrag?3:0)+(r.km?2:0)+(r.plz?2:0)+Math.min(10,words/3)}
 
 /* ---------- Erkennung ---------- */
 let libP=null,workerP=null;
@@ -152,9 +173,19 @@ async function worker(){if(workerP)return workerP;
   workerP.catch(()=>{workerP=null});return workerP}
 async function read(file,progress){
   onProg=progress||null;
-  const [w,canvas]=await Promise.all([worker(),prepare(file)]);
-  const {data}=await w.recognize(canvas);
-  onProg=null;const r=parse(data.text);r.text=data.text;return r}
+  const [w,bmp]=await Promise.all([worker(),loadBmp(file)]);
+  // Versuche nacheinander, bis das Ergebnis brauchbar ist: aufbereitet → Graustufen → gedreht
+  const tries=[{},{plain:true},{rot:90},{rot:270}];let best=null;const log=[];
+  try{for(let t=0;t<tries.length;t++){
+      if(t&&progress)progress('retry',t/tries.length);
+      const {canvas,info}=prepare(bmp,tries[t]);if(info.blank){log.push(info);continue}
+      const {data}=await w.recognize(canvas);const r=parse(data.text);r.text=data.text;r.q=quality(r);info.q=Math.round(r.q*10)/10;log.push(info);
+      if(!best||r.q>best.q){best=r;best.img=canvas}
+      if(best.q>=8)break}}
+  finally{onProg=null}
+  if(!best){best=parse('');best.text='';best.q=0}
+  best.diag=log.map(i=>`${i.rot?i.rot+'° ':''}${i.plain?'grau ':''}${i.w}×${i.h}${i.blank?' LEER (Bild einfarbig, Helligkeit '+i.mean+')':' · Kontrast '+i.range+(i.black!=null?' · '+i.black+' % schwarz':'')+' · Güte '+i.q}`).join('\n');
+  return best}
 /* ---------- Kilometerstand vom Tacho (vor dem Tanken) ----------
    Tacho-Anzeigen sind oft helle Ziffern auf dunklem Grund: Graustufen, Kontrast strecken, bei dunklem Bild umkehren.
    Nur Ziffern erlauben; danach die Einstellungen für Quittungen wiederherstellen. */
@@ -202,7 +233,7 @@ function kmIdle(lang){clearTimeout(kmT[lang]);kmT[lang]=setTimeout(async()=>{con
 const PASSES={deu:[['6',1],['11',2],['7',2]],'7seg':[['7',2],['6',2],['11',1]]};
 const prefKey='tankbox-kmocr';
 async function readKm(file,opt={}){
-  const bmp=await createImageBitmap(file);const min=+opt.min||0,good=min>0?3:1.6;let text='',best=[],used='',err=null;
+  const bmp=await loadBmp(file);const min=+opt.min||0,good=min>0?3:1.6;let text='',best=[],used='',err=null;
   let pref='deu';try{pref=localStorage.getItem(prefKey)||'deu'}catch(e){}
   const order=pref==='7seg'?['7seg','deu']:['deu','7seg'];
   for(const lang of order){let w;
@@ -217,5 +248,5 @@ async function readKm(file,opt={}){
   if(used){try{localStorage.setItem(prefKey,used)}catch(e){}}
   if(!best.length&&err&&!text)throw err;
   return {km:best[0]&&best[0].s>0?best[0].v:null,cands:best.filter(x=>x.s>0).slice(0,3).map(x=>x.v),text}}
-g.TankOCR={read,readKm,kmCands,prepKm,parse,prepare,lev,streetKey,warm:()=>worker().catch(()=>{})};
+g.TankOCR={read,readKm,kmCands,prepKm,quality,loadBmp,parse,prepare,lev,streetKey,warm:()=>worker().catch(()=>{})};
 })(typeof window!=='undefined'?window:globalThis);

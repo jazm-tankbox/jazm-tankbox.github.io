@@ -1,6 +1,6 @@
 (function(){
 'use strict';
-const APP_VERSION='0.14.2.1';
+const APP_VERSION='0.14.3.1';
 /* Eigener Speicher je Adresse: die Live-App unter / behält ihre Namen, eine Test-App unter /test/ bekommt eigene */
 const BASE=location.pathname.replace(/[^/]*$/,'');
 const NS=BASE==='/'?'':BASE.replace(/^\/|\/$/g,'').replace(/[^a-z0-9]+/gi,'-').toLowerCase()+'-';
@@ -1287,8 +1287,9 @@ function openForm(id,withPhoto){
     const ocr=async file=>{if(!window.TankOCR){focr.textContent='Die Texterkennung fehlt in diesem App-Stand.';return}
       const run=++ocrRun;focr.className='hint ocrbusy';focr.textContent='Quittung wird gelesen …';
       fm.querySelectorAll('.ocr').forEach(x=>x.classList.remove('ocr'));
-      let r;try{r=await TankOCR.read(file,(st,p)=>{if(run!==ocrRun)return;
-          focr.textContent=/recogni/i.test(st)?`Quittung wird gelesen … ${Math.round(p*100)} %`:'Texterkennung wird vorbereitet …'})}
+      let r,retry=false;try{r=await TankOCR.read(file,(st,p)=>{if(run!==ocrRun)return;
+          if(st==='retry'){retry=true;focr.textContent='Weiterer Versuch (Graustufen bzw. gedreht) …';return}
+          focr.textContent=/recogni/i.test(st)?`Quittung wird gelesen${retry?' (weiterer Versuch)':''} … ${Math.round(p*100)} %`:'Texterkennung wird vorbereitet …'})}
       catch(e){if(run!==ocrRun)return;focr.className='hint';
         focr.textContent=navigator.onLine===false||(e&&e.message==='offline')?'Für das erste Auslesen braucht die App einmal Internet (lädt die Texterkennung, ca. 10 MB). Danach geht es auch offline.':'Auslesen hat nicht geklappt ('+String(e&&e.message||e).slice(0,120)+'). Bitte die Werte abtippen.';return}
       if(run!==ocrRun||!fm.isConnected)return;
@@ -1319,7 +1320,8 @@ function openForm(id,withPhoto){
       focr.insertAdjacentHTML('beforeend',' <button type="button" class="linkbtn" id="ocrTxt">Erkannten Text anzeigen</button>');
       focr.querySelector('#ocrTxt').onclick=()=>{let d=document.getElementById('ocrdlg');
         if(!d){d=document.createElement('dialog');d.id='ocrdlg';d.className='dsdlg';document.body.appendChild(d)}
-        d.innerHTML=`<h2>Erkannter Text</h2><p class="ds-dlg-intro">So hat die Texterkennung die Quittung gelesen. Wenn etwas nicht übernommen wird, schick einen Screenshot davon.</p><pre class="ocrpre">${esc(r.text||'')}</pre><div class="dsrow"><button type="button" class="ds-btn pri" id="ocrX">Schließen</button></div>`;
+        d.innerHTML=`<h2>Erkannter Text</h2><p class="ds-dlg-intro">So hat die Texterkennung die Quittung gelesen. Wenn etwas nicht übernommen wird, schick einen Screenshot davon.</p><pre class="ocrpre">${esc(r.text||'')}</pre>${r.diag?`<p class="ds-dlg-intro"><b>Technik:</b></p><pre class="ocrpre">${esc(r.diag)}</pre>`:''}<img class="ocrimg" alt="Aufbereitetes Bild für die Texterkennung"><div class="dsrow"><button type="button" class="ds-btn pri" id="ocrX">Schließen</button></div>`;
+        try{if(r.img){const im=d.querySelector('.ocrimg');const t=document.createElement('canvas'),k=Math.min(1,700/r.img.width);t.width=Math.round(r.img.width*k);t.height=Math.round(r.img.height*k);t.getContext('2d').drawImage(r.img,0,0,t.width,t.height);im.src=t.toDataURL('image/jpeg',.7)}}catch(e){}
         d.querySelector('#ocrX').onclick=()=>d.close();d.showModal()};
       const first=fm.querySelector('.field.no, input:placeholder-shown[required]');if(miss.length&&first&&first.focus)first.focus()};
     s.querySelector('#fcam').addEventListener('change',e=>pick(e.target));s.querySelector('#fgal').addEventListener('change',e=>pick(e.target));

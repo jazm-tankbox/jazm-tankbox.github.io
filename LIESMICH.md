@@ -1,4 +1,11 @@
-# MyTankBox – Test-App 0.14.2.1
+# MyTankBox – Test-App 0.14.3.1
+
+## Neu in 0.14.3 – Quittungs-Erkennung abgesichert
+
+- Bildaufbereitung braucht nur noch einen Bruchteil des Speichers (vorher über 200 MB bei großen Fotos – Handys liefern dann teils stillschweigend ein leeres Bild).
+- Die App prüft ihr Ergebnis selbst. Ist es unbrauchbar, folgen weitere Versuche: Graustufen ohne Aufbereitung, dann um 90° bzw. 270° gedreht (quer gespeicherte Fotos). Das beste Ergebnis wird übernommen.
+- Liter auf Lieferscheinen auch bei schlecht gelesener Zapfpunkt-Zeile („xp 03 56,92 |“, „r7p 03 56,92 1]“).
+- „Erkannten Text anzeigen“ zeigt zusätzlich das aufbereitete Bild und technische Angaben (Größe, Kontrast, Versuche).
 
 ## Neu in 0.14.2 – Shell-Card-Lieferscheine
 
