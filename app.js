@@ -1,6 +1,6 @@
 (function(){
 'use strict';
-const APP_VERSION='0.14.1.1';
+const APP_VERSION='0.14.2.1';
 /* Eigener Speicher je Adresse: die Live-App unter / behält ihre Namen, eine Test-App unter /test/ bekommt eigene */
 const BASE=location.pathname.replace(/[^/]*$/,'');
 const NS=BASE==='/'?'':BASE.replace(/^\/|\/$/g,'').replace(/[^a-z0-9]+/gi,'-').toLowerCase()+'-';
@@ -110,8 +110,9 @@ function stats(){
   const svY=VS().filter(v=>v.datum.startsWith(y)).reduce((t,v)=>t+(+v.betrag||0),0),waY=yearF.reduce((t,f)=>t+(+f.waesche||0),0);
   const kmAll=s.length>1?s[s.length-1].km-s[0].km:0;
   const costAll=s.length>1?s.slice(1).reduce((t,f)=>t+(+f.betrag||0),0):0;
+  const pf=s.filter(f=>f.betrag>0&&f.liter>0),pAvg=pf.length?pf.reduce((t,f)=>t+(+f.betrag),0)/pf.reduce((t,f)=>t+(+f.liter),0):null,anyNo=s.some(f=>!(f.betrag>0));
   return {c,avg:dist>0?lit/dist*100:null,year:sum(yearF)+svY+waY,yearX:svY+waY,yearN:yearF.length,month:sum(monF),monthN:monF.length,
-    kmNow:s.length?s[s.length-1].km:null,per100:kmAll>0?costAll/kmAll*100:null,
+    kmNow:s.length?s[s.length-1].km:null,per100:anyNo?(dist>0&&pAvg?lit/dist*100*pAvg:null):kmAll>0?costAll/kmAll*100:null,
     kmYear:(()=>{const ys=s.filter(f=>f.datum.startsWith(y));const before=s.filter(f=>f.datum<y+'-01-01');const start=before.length?before[before.length-1].km:(ys[0]&&ys[0].km);return ys.length&&start!=null?ys[ys.length-1].km-start:0})()}
 }
 /* Plausibilität: Hinweise, kein Verbot */
@@ -333,7 +334,7 @@ function fillRow(f,c,i){const x=c[f.id]||{};const d=parse(f.datum);
     ${f.station?`<span class="s stline">${badge(stOf(f),f.station,'sm')}${esc(f.station)}</span>`:''}
     ${f.waesche?`<span class="s">inkl. Autowäsche ${eur(f.waesche)}</span>`:''}
     ${x.verb!=null?`<span class="s">${nf(x.verb,1)} l/100 km auf ${km(x.seit)}</span>`:''}</span>
-    <span class="ramt"><span class="amt num">${eur(fillCost(f))}</span>${f.ppl?`<small class="muted num">${nf(f.ppl,3)} €/l</small>`:''}${f.foto?`<small class="muted" aria-label="mit Foto">${svg('cam','mini-ic')}</small>`:''}</span></button>`}
+    <span class="ramt">${fillCost(f)?`<span class="amt num">${eur(fillCost(f))}</span>`:'<small class="muted">ohne Preis</small>'}${f.ppl?`<small class="muted num">${nf(f.ppl,3)} €/l</small>`:''}${f.foto?`<small class="muted" aria-label="mit Foto">${svg('cam','mini-ic')}</small>`:''}</span></button>`}
 let first=true;
 function render(){
   if(!db)return;bkDot();
@@ -452,7 +453,7 @@ function viewStats(s){
     adb=sP.filter(v=>v.typ==='adblue'),adbE=adb.reduce((a,v)=>a+(+v.betrag||0),0),adbL=adb.reduce((a,v)=>a+(+v.menge||0),0),
     serv=sP.filter(v=>v.typ!=='waesche'&&v.typ!=='adblue').reduce((a,v)=>a+(+v.betrag||0),0),total=fuel+wash+adbE+serv,lit=fP.reduce((a,f)=>a+(+f.liter||0),0),kmD=kmDriven(r);
   const verbs=fP.filter(f=>c[f.id]&&c[f.id].verb!=null);const vl=verbs.reduce((a,f)=>a+c[f.id].seit*c[f.id].verb/100,0),vk=verbs.reduce((a,f)=>a+c[f.id].seit,0);
-  const avgV=vk?vl/vk*100:null,avgP=lit?fP.filter(f=>f.liter).reduce((a,f)=>a+(+f.betrag||0),0)/lit:null;
+  const avgV=vk?vl/vk*100:null,pf=fP.filter(f=>f.liter>0&&f.betrag>0),pl=pf.reduce((a,f)=>a+(+f.liter),0),avgP=pl?pf.reduce((a,f)=>a+(+f.betrag),0)/pl:null,noPrice=fP.filter(f=>!(f.betrag>0)).length;
   // Monate oder Jahre
   const months=monthsBetween(r.from,r.to),byYear=months.length>36;
   const buckets=byYear?[...new Set(months.map(m=>m.slice(0,4)))]:months;
@@ -487,6 +488,7 @@ function viewStats(s){
   return `<section class="view">
     <div class="statctl">${fzChip()}${db.fahrzeuge.length>1?`<label class="check sm"><input type="checkbox" id="stAll"${stv.all?' checked':''}> alle Fahrzeuge</label>`:''}</div>
     <div class="pchips" role="tablist">${chips.map(([k,l])=>`<button type="button" data-p="${k}" aria-pressed="${stv.p===k}">${l}</button>`).join('')}</div>
+    ${noPrice?`<p class="hint">${noPrice} Tankung${noPrice===1?'':'en'} ohne Preis (Lieferschein) – in den Kosten nicht enthalten, Betrag lässt sich unter „Bearbeiten“ nachtragen.</p>`:''}
     <div class="summary"><div class="label">${esc(r.label)}${stv.all?' · alle Fahrzeuge':''}</div>
       <div class="kpis">
         <div><b class="num">${eur0(total)}</b><span>Kosten gesamt</span></div>
@@ -543,7 +545,7 @@ async function openDetail(id){
     <dl class="kv">
       <dt>Kilometerstand</dt><dd class="num">${km(f.km)}${x.dist!=null?` <span class="muted">(+${nf(x.dist,0)})</span>`:''}${kurl?`<img class="tachothumb" src="${kurl}" alt="Tacho-Foto vor dem Tanken">`:''}</dd>
       <dt>Getankt</dt><dd class="num">${nf(f.liter,2)} l${f.voll===false?' · teilweise':' · voll'}</dd>
-      <dt>Kraftstoff-Betrag</dt><dd class="num">${eur(f.betrag)}</dd>
+      <dt>Kraftstoff-Betrag</dt><dd class="num">${f.betrag?eur(f.betrag):'<span class="muted">ohne Preis (Lieferschein)</span>'}</dd>
       ${f.waesche?`<dt>Autowäsche</dt><dd class="num">${eur(f.waesche)}</dd><dt>Quittung gesamt</dt><dd class="num"><b>${eur(fillCost(f))}</b></dd>`:''}
       <dt>Preis pro Liter</dt><dd class="num">${f.ppl?nf(f.ppl,3)+' €':'–'}</dd>
       <dt>Kraftstoff</dt><dd>${esc(f.sorte||'–')}</dd>
@@ -1098,6 +1100,11 @@ function openScanner(opt={}){
 /* ---------- Offener Tankvorgang: vor dem Tanken den Tacho fotografieren, danach die Quittung scannen ----------
    Gemerkt wird in db.meta.draft {fz, km, datum, zeit, foto, t}; die nächste neue Tankung übernimmt den km-Stand. */
 const draftFor=()=>{const d=db.meta.draft;return d&&(!d.fz||d.fz===curFz())?d:null};
+/* falsch gelesene Ziffer im km-Stand (Spiegelung, 6↔4, 8↔0 …): eine Ziffer tauschen, bis der Wert knapp über dem letzten Stand liegt */
+const DIGALT={0:'869',1:'74',2:'7',3:'8',4:'61',5:'689',6:'5804',7:'12',8:'0365',9:'80'};
+function kmFix(v,last){if(!(v>0)||!(last>0)||(v>=last&&v<=last+4000))return v;const t=String(v);let best=null;
+  for(let i=0;i<t.length;i++)for(const d of DIGALT[t[i]]||''){const n=+(t.slice(0,i)+d+t.slice(i+1));if(n>=last&&n<=last+4000&&(best==null||n<best))best=n}
+  return best==null?v:best}
 const lastKm=()=>Math.max(0,...VF().map(f=>+f.km||0),...VS().map(v=>+v.km||0));
 function camFile(){return new Promise(res=>{const i=document.createElement('input');i.type='file';i.accept='image/*';i.capture='environment';
   i.onchange=()=>res(i.files[0]||null);window.addEventListener('focus',()=>setTimeout(()=>{if(!i.files.length)res(null)},1200),{once:true});i.click()})}
@@ -1242,7 +1249,7 @@ function openForm(id,withPhoto){
       <label class="field"><span>Kilometerstand</span><input name="km" inputmode="numeric" required placeholder="${last?'zuletzt '+nf(last.km,0):'z. B. 48 250'}" value="${f.km!=null?f.km:''}"></label>
       ${dr?`<p class="hint tachohint" id="ftacho">${svg('cam','bi')} Vom Tacho-Foto ${dr.datum===iso(new Date())?'':esc(fmtS(dr.datum))+' '}${esc(dr.zeit||'')} übernommen.</p>`:''}
       <div class="grid2"><label class="field"><span>Liter</span><input name="liter" inputmode="decimal" required placeholder="45,12" value="${v('liter',2)}"></label>
-        <label class="field"><span>Betrag Kraftstoff (€)</span><input name="betrag" inputmode="decimal" required placeholder="78,40" value="${v('betrag',2)}"></label></div>
+        <label class="field"><span>Betrag Kraftstoff (€)</span><input name="betrag" inputmode="decimal" placeholder="leer bei Lieferschein" value="${v('betrag',2)}"></label></div>
       <div class="grid2"><label class="field"><span>Autowäsche (€)</span><input name="waesche" inputmode="decimal" placeholder="keine" value="${v('waesche',2)}"></label>
         <div class="field"><span>Quittung gesamt</span><output id="fsum" class="num sumout">–</output></div></div>
       <p class="hint" style="margin-top:-6px">Steht eine Wäsche mit auf der Quittung, bei „Betrag Kraftstoff“ nur den Sprit eintragen.</p>
@@ -1289,6 +1296,7 @@ function openForm(id,withPhoto){
         if(i.value&&!(isNew&&(k==='datum'||k==='zeit'||k==='sorte')))return false;i.value=val;i.closest('.field,.check')?.classList.add('ocr');return true};
       const fx=(v,d)=>nf(v,d).replace(/\./g,'');const got=[];
       if(put('datum',r.datum))got.push(fmtS(r.datum));put('zeit',r.zeit);
+      let kmNote='';if(r.km&&isNew){const fx2=kmFix(r.km,lastKm());if(fx2!==r.km){kmNote=`km-Stand als ${nf(r.km,0)} gelesen, korrigiert auf ${nf(fx2,0)} (passt zum letzten Stand) – bitte prüfen.`;r.km=fx2}}
       if(put('km',r.km))got.push(km(r.km));
       else if(dr&&r.km&&Math.round(num(el.km.value))!==r.km){const th=s.querySelector('#ftacho');
         if(th){th.className='hint tachohint ocrwarn';th.innerHTML=`${svg('cam','bi')} Übernommen vom Tacho-Foto: <b>${esc(km(Math.round(num(el.km.value))))}</b>. Auf der Quittung steht ${esc(km(r.km))}. <button type="button" class="linkbtn" id="kmRc">Quittungswert nehmen</button>`;
@@ -1302,10 +1310,12 @@ function openForm(id,withPhoto){
       if(known){put('station',known.name);put('adresse',known.adresse);if(known.name)got.push(known.name+' (bekannt)')}
       else{put('station',r.station);if(put('adresse',r.adresse))got.push(r.adresse);else if(r.station)got.push(r.station)}
       live();buzz(got.length?[8,40,8]:[20,40,20]);
-      const miss=[!r.km&&'Kilometerstand',!r.liter&&'Liter',!r.betrag&&'Betrag',r.plz&&!r.strasse&&!known&&'Straße (einmal eintragen, danach erkennt die App die Tankstelle)'].filter(Boolean);
+      const miss=[!r.km&&'Kilometerstand',!r.liter&&'Liter',!r.betrag&&!r.lieferschein&&'Betrag',r.plz&&!r.strasse&&!known&&'Straße (einmal eintragen, danach erkennt die App die Tankstelle)'].filter(Boolean);
       focr.className='hint '+(miss.length||!r.ok?'ocrwarn':'ocrok');
       focr.innerHTML=got.length?`<b>Erkannt:</b> ${esc(got.join(' · '))}.`+(miss.length?` <b>Nicht gefunden:</b> ${esc(miss.join(', '))} – bitte ergänzen.`:r.ok&&r.sumOk!==false?' Rechnung geht auf ✓ Bitte kurz prüfen.':' Bitte prüfen.')
         :'Auf dem Foto wurde nichts Brauchbares erkannt. Tipp: Quittung flach hinlegen, gerade von oben fotografieren, ohne Schatten.';
+      if(r.lieferschein&&!touched.has('betrag')&&!el.betrag.value)focr.insertAdjacentHTML('beforeend',' <b>Lieferschein ohne Preis</b> – Betrag leer lassen oder später aus der Rechnung nachtragen.');
+      if(kmNote)focr.insertAdjacentHTML('beforeend',' <b>'+esc(kmNote)+'</b>');
       focr.insertAdjacentHTML('beforeend',' <button type="button" class="linkbtn" id="ocrTxt">Erkannten Text anzeigen</button>');
       focr.querySelector('#ocrTxt').onclick=()=>{let d=document.getElementById('ocrdlg');
         if(!d){d=document.createElement('dialog');d.id='ocrdlg';d.className='dsdlg';document.body.appendChild(d)}
@@ -1322,15 +1332,16 @@ function openForm(id,withPhoto){
     fm.addEventListener('input',live);fm.addEventListener('change',live);if(old)live();
     if(withPhoto&&!old)setTimeout(scan,motion()?450:50);
     fm.onsubmit=async e=>{e.preventDefault();const o=read();
-      const bad=[];if(!/^\d{4}-\d{2}-\d{2}$/.test(o.datum))bad.push('datum');if(!(o.km>0))bad.push('km');if(!(o.liter>0))bad.push('liter');if(!(o.betrag>0))bad.push('betrag');
+      const bad=[];if(!/^\d{4}-\d{2}-\d{2}$/.test(o.datum))bad.push('datum');if(!(o.km>0))bad.push('km');if(!(o.liter>0))bad.push('liter');
       fm.querySelectorAll('.field.no').forEach(x=>x.classList.remove('no'));
-      if(bad.length){bad.forEach(k=>fm.elements[k].closest('.field').classList.add('no'));buzz([20,40,20]);toast('Bitte Datum, Kilometerstand, Liter und Betrag ausfüllen.');return}
+      if(bad.length){bad.forEach(k=>fm.elements[k].closest('.field').classList.add('no'));buzz([20,40,20]);toast('Bitte Datum, Kilometerstand und Liter ausfüllen.');return}
       const w=checks(o,old&&old.id);
       if(w.length&&!fm.dataset.ok){fm.dataset.ok='1';warn.hidden=false;warn.innerHTML=w.map(esc).join('<br>')+'<br><b>Nochmal „Speichern“ tippen, um trotzdem zu speichern.</b>';buzz([20,40,20]);warn.scrollIntoView({block:'nearest',behavior:'smooth'});return}
       const rec=Object.assign(old||{id:uid(),created:Date.now(),fz:curFz()},o,{updated:Date.now()});
       if(newFoto){const fid=uid();await fotoPut(fid,newFoto);if(rec.foto)fotoDel(rec.foto).catch(()=>{});rec.foto=fid}
       else if(fotoGone&&rec.foto){fotoDel(rec.foto).catch(()=>{});rec.foto=null}
       if(!rec.ppl||Number.isNaN(rec.ppl))delete rec.ppl;
+      if(!(rec.betrag>0))delete rec.betrag;
       if(!(rec.waesche>0))delete rec.waesche;
       if(!rec.adresse)delete rec.adresse;
       rememberStation(rec.station,rec.adresse);

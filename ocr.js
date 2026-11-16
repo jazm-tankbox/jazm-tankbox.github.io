@@ -41,7 +41,8 @@ const AMT=/(?<![\d.,:])(\d{1,4})\s?[,.]\s?(\d{2})(?![\d.,:])/g;
 const amts=l=>[...l.matchAll(AMT)].map(m=>parseFloat(m[1]+'.'+m[2]));
 const lastAmt=l=>{const a=amts(l);return a.length?a[a.length-1]:NaN};
 function parse(text){
-  const lines=String(text||'').split(/\r?\n/).map(l=>l.replace(/[|]/g,' ').replace(/\s+/g,' ').trim()).filter(Boolean);
+  // „l“ wird oft als „]“ gelesen: hinter Buchstaben (Diese] → Diesel) und als Einheit hinter Litern (56,92] → 56,92 l)
+  const lines=String(text||'').split(/\r?\n/).map(l=>l.replace(/[|]/g,' ').replace(/([A-Za-zäöüß])\](?=\s|$|[.,])/g,'$1l').replace(/(\d[,.]\d{2})\s?[\]\[](?=\s|$|\*)/g,'$1 l').replace(/\s+/g,' ').trim()).filter(Boolean);
   const r={},why={};
   /* Datum & Uhrzeit: erstes plausibles Datum */
   for(const l of lines){const m=l.match(/(?<!\d)([0-3]?\d)\s?[.,]\s?([01]?\d)\s?[.,]\s?(20\d\d|\d\d)(?!\d)/);
@@ -61,6 +62,8 @@ function parse(text){
     if(li)r.liter=parseFloat(li.i+'.'+li.d.slice(0,2));
     if(r.ppl||r.liter)break}
   if(!r.liter)for(const l of lines){const m=l.match(/(\d{1,3})\s?[,.]\s?(\d{2})\s?(?:l|ltr|liter)\b/i);if(m){r.liter=parseFloat(m[1]+'.'+m[2]);break}}
+  // Lieferschein (Tankkarte): Zapfpunkt-Zeile „Zp 03  56,92 l“, Liter mit „1“ statt „l“ am Ende
+  if(!r.liter)for(const l of lines){const m=l.match(/\bz[pf]\s?\d{1,2}\b.*?(\d{1,3})\s?[,.]\s?(\d{2})(?:\s?[l1iI]\b|\s|$)/i);if(m){const v=parseFloat(m[1]+'.'+m[2]);if(v>=1&&v<=200){r.liter=v;break}}}
   /* Kraftstoff + Betrag */
   const FUEL=[['Premium-Diesel',/(ultimate|v-?power|excellium|supreme|premium|ultra)\s?diese/i],['Diesel',/diese[l1i\]]?/i],['Super Plus',/super\s?(plus|\+|98|100)/i],
     ['Super E10',/e\s?10/i],['Super E5',/super|e\s?5\b|benzin|95/i],['LPG',/\blpg|autogas/i]];
@@ -108,6 +111,8 @@ function parse(text){
   if(brand||ort)r.station=[brand,ort].filter(Boolean).join(' ');
   /* Prüfstatus */
   r.ok=!!(r.liter&&r.ppl&&r.betrag&&near(r.liter*r.ppl,r.betrag,.06));
+  // Lieferschein der Tankkarte: ohne Preise, Abrechnung später über die Karte
+  if(!r.betrag&&lines.some(l=>/lieferschein/i.test(l)))r.lieferschein=true;
   if(r.gesamt&&r.betrag)r.sumOk=near(r.betrag+(r.waesche||0),r.gesamt,.02);
   return r;
 }

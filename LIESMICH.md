@@ -1,4 +1,11 @@
-# MyTankBox – Test-App 0.14.1.1
+# MyTankBox – Test-App 0.14.2.1
+
+## Neu in 0.14.2 – Shell-Card-Lieferscheine
+
+- Lieferscheine der Tankkarte (ohne Preis) werden erkannt: Datum, Uhrzeit, Kilometer, Liter („Zp 03 56,92 l“), Kraftstoff und Tankstelle. Der Betrag ist jetzt kein Pflichtfeld mehr und kann später unter „Bearbeiten“ nachgetragen werden.
+- Als „]“ gelesenes „l“ wird korrigiert (56,92] → 56,92 l, Rauxe] → Rauxel).
+- Falsch gelesene Ziffer im km-Stand (z. B. durch Spiegelung 146038 statt 166038): Passt der Wert nicht zum letzten Stand, tauscht die App eine verwechselbare Ziffer und weist darauf hin.
+- Tankungen ohne Preis: im Verlauf „ohne Preis“, in der Auswertung ein Hinweis; Ø-Preis und „Sprit pro 100 km“ rechnen nur mit Tankungen mit Preis.
 
 ## Neu in 0.14.1 – Auslesen repariert
 
