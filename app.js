@@ -1,6 +1,6 @@
 (function(){
 'use strict';
-const APP_VERSION='0.14.3.1';
+const APP_VERSION='0.14.4.1';
 /* Eigener Speicher je Adresse: die Live-App unter / behält ihre Namen, eine Test-App unter /test/ bekommt eigene */
 const BASE=location.pathname.replace(/[^/]*$/,'');
 const NS=BASE==='/'?'':BASE.replace(/^\/|\/$/g,'').replace(/[^a-z0-9]+/gi,'-').toLowerCase()+'-';
@@ -1079,20 +1079,29 @@ function openScanner(opt={}){
     el.querySelector('[data-shot]').onclick=async()=>{
       if(done||!video.videoWidth)return;buzz(12);
       const fl=el.querySelector('.rsflash');if(motion())fl.animate([{opacity:.85},{opacity:0}],{duration:260});
-      // Vollauflösung über ImageCapture, sonst Standbild aus dem Video
-      // Das Vollbild-Foto hat auf vielen Handys ein anderes Format (4:3) oder eine andere Ausrichtung als die Vorschau (16:9).
-      // Dann passt der Rahmen nicht mehr → nur verwenden, wenn das Seitenverhältnis stimmt, sonst Standbild aus dem Video.
-      const vv=video.videoWidth/video.videoHeight;let bmp=null;
-      try{if(window.ImageCapture){const ic=new ImageCapture(track);const b=await ic.takePhoto();const t=await createImageBitmap(b);
-        if(Math.abs(t.width/t.height-vv)/vv<.03)bmp=t;else if(t.close)t.close()}}catch(e){bmp=null}
-      if(!bmp){try{bmp=await createImageBitmap(video)}catch(e){}}
+      // Vollauflösung über ImageCapture. Das Foto hat oft ein anderes Format als die Vorschau (4:3 statt 16:9):
+      // Die Vorschau ist dann der mittige Ausschnitt des Fotos im Seitenverhältnis der Vorschau → Rahmen entsprechend umrechnen.
+      const V=video.videoWidth,VH=video.videoHeight,vv=V/VH;let bmp=null,map=null,whole=false;
+      try{if(window.ImageCapture){const ic=new ImageCapture(track);const b=await ic.takePhoto();
+        let t;try{t=await createImageBitmap(b,{imageOrientation:'from-image'})}catch(e){t=await createImageBitmap(b)}
+        const pv=t.width/t.height;
+        if((pv>=1)===(vv>=1)){let cw=t.width,ch=cw/vv;if(ch>t.height){ch=t.height;cw=ch*vv}map={ox:(t.width-cw)/2,oy:(t.height-ch)/2,s:cw/V};bmp=t}
+        else if(!opt.wide){bmp=t;whole=true} // Foto quer, Vorschau hoch: ganzes Foto nehmen, die Texterkennung dreht selbst
+        else if(t.close)t.close()}}catch(e){bmp=null}
+      if(!bmp){try{bmp=await createImageBitmap(video);map={ox:0,oy:0,s:bmp.width/V}}catch(e){}}
       if(!bmp){toast('Foto konnte nicht aufgenommen werden.');return}
-      // Rahmen (Bildschirm) → Bildkoordinaten; das Video füllt den Schirm „cover“
-      const vw=el.clientWidth,vh=el.clientHeight,iw=bmp.width,ih=bmp.height,sc=Math.max(vw/iw,vh/ih),ox=(vw-iw*sc)/2,oy=(vh-ih*sc)/2;
-      const r=frame.getBoundingClientRect(),m=.06; // etwas Rand dazugeben
-      let x=(r.left-ox)/sc,y=(r.top-oy)/sc,w=r.width/sc,h=r.height/sc;
-      x-=w*m;y-=h*m;w*=1+2*m;h*=1+2*m;x=Math.max(0,x);y=Math.max(0,y);w=Math.min(iw-x,w);h=Math.min(ih-y,h);
-      const c=document.createElement('canvas');c.width=Math.round(w);c.height=Math.round(h);c.getContext('2d').drawImage(bmp,x,y,w,h,0,0,c.width,c.height);
+      let x=0,y=0,w=bmp.width,h=bmp.height;
+      if(!whole){
+        // Rahmen (Bildschirm) → Vorschau-Koordinaten (das Video füllt den Schirm „cover“) → Foto-Koordinaten
+        const sw=el.clientWidth,sh=el.clientHeight,sc=Math.max(sw/V,sh/VH),ox=(sw-V*sc)/2,oy=(sh-VH*sc)/2;
+        const r=frame.getBoundingClientRect(),m=map.s>1.2?.1:.06; // beim umgerechneten Foto etwas mehr Rand
+        let fx=(r.left-ox)/sc,fy=(r.top-oy)/sc,fw=r.width/sc,fh=r.height/sc;
+        fx-=fw*m;fy-=fh*m;fw*=1+2*m;fh*=1+2*m;
+        x=Math.max(0,map.ox+fx*map.s);y=Math.max(0,map.oy+fy*map.s);w=Math.min(bmp.width-x,fw*map.s);h=Math.min(bmp.height-y,fh*map.s)}
+      // nicht größer als nötig (Speicher): längste Seite höchstens 4000 px
+      const k=Math.min(1,4000/Math.max(w,h));
+      const c=document.createElement('canvas');c.width=Math.round(w*k);c.height=Math.round(h*k);c.getContext('2d').drawImage(bmp,x,y,w,h,0,0,c.width,c.height);
+      if(bmp.close)bmp.close();
       c.toBlob(b=>finish(b),'image/jpeg',.92)};
   });
 }

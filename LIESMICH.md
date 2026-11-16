@@ -1,4 +1,10 @@
-# MyTankBox – Test-App 0.14.3.1
+# MyTankBox – Test-App 0.14.4.1
+
+## Neu in 0.14.4 – Scanner mit voller Auflösung
+
+- Der Scanner nimmt wieder das volle Kamerafoto. Hat es ein anderes Format als die Vorschau (4:3 statt 16:9), wird der Rahmen richtig umgerechnet; vorher wurde dann nur das kleine Vorschaubild (ca. 800 px breit) verwendet, auf dem die Schrift zu klein war.
+- Schwarz-Weiß-Aufbereitung passt die Schwelle ans Foto an (flaue, unscharfe Fotos wurden vorher fast weiß).
+- „Technik“ zeigt zusätzlich die Fotogröße und die verwendete Schwelle.
 
 ## Neu in 0.14.3 – Quittungs-Erkennung abgesichert
 

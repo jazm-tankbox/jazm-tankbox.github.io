@@ -144,14 +144,23 @@ function prepare(bmp,opt={}){
   const id=x.getImageData(0,0,w,h),d=id.data,n=w*h;
   const gr=new Uint8ClampedArray(n);let mn=255,mx=0,sum=0;
   for(let i=0,p=0;i<n;i++,p+=4){const v=(77*d[p]+150*d[p+1]+29*d[p+2])>>8;gr[i]=v;sum+=v;if(v<mn)mn=v;if(v>mx)mx=v}
-  const info={w,h,rot,plain:!!opt.plain,mean:Math.round(sum/n),range:mx-mn};
+  const info={w,h,rot,plain:!!opt.plain,mean:Math.round(sum/n),range:mx-mn,src:bmp.width+'×'+bmp.height};
   if(info.range<20){info.blank=true;return {canvas:c,info}} // Bild leer/einfarbig → Aufbereitung sinnlos
   let black=0;
-  if(opt.plain){for(let i=0,p=0;i<n;i++,p+=4){d[p]=d[p+1]=d[p+2]=gr[i];d[p+3]=255}}
+  if(opt.plain){const hs=new Uint32Array(256);for(let i=0;i<n;i++)hs[gr[i]]++;let lo=0,hi=255,acc=0;
+    for(let t=0;t<256;t++){acc+=hs[t];if(acc>=n*.01){lo=t;break}}acc=0;for(let t=255;t>=0;t--){acc+=hs[t];if(acc>=n*.01){hi=t;break}}
+    const f=255/Math.max(1,hi-lo);for(let i=0,p=0;i<n;i++,p+=4){const v=(gr[i]-lo)*f;d[p]=d[p+1]=d[p+2]=v;d[p+3]=255}}
   else{const k=4,bw=Math.ceil(w/k),bh=Math.ceil(h/k),small=new Float32Array(bw*bh);
     for(let yy=0;yy<bh;yy++)for(let xx=0;xx<bw;xx++){let s=0,m=0;for(let j=0;j<k;j++){const y=yy*k+j;if(y>=h)break;for(let i2=0;i2<k;i2++){const xq=xx*k+i2;if(xq>=w)break;s+=gr[y*w+xq];m++}}small[yy*bw+xx]=s/m}
     const bg=boxBlur(small,bw,bh,Math.max(2,Math.round(bw/120)));
-    for(let y=0;y<h;y++){const by=Math.min(bh-1,y/k|0)*bw;for(let xq=0;xq<w;xq++){const i=y*w+xq,p=i*4;const v=gr[i]/(bg[by+Math.min(bw-1,xq/k|0)]+1)*255>200?255:0;if(!v)black++;d[p]=d[p+1]=d[p+2]=v;d[p+3]=255}}
+    // Verhältnis Pixel/Hintergrund (Papier ≈ 255, Schrift dunkler) – Schwelle ans Bild anpassen:
+    // bei flauen, unscharfen Fotos liegt die Schrift nur knapp unter dem Papier
+    const rat=new Uint8ClampedArray(n),hist=new Uint32Array(256);
+    for(let y=0;y<h;y++){const by=Math.min(bh-1,y/k|0)*bw;for(let xq=0;xq<w;xq++){const i=y*w+xq;const v=gr[i]/(bg[by+Math.min(bw-1,xq/k|0)]+1)*255;rat[i]=v;hist[rat[i]]++}}
+    let thr=200,acc=0;for(let t=0;t<=thr;t++)acc+=hist[t];
+    if(acc<n*.03){acc=0;for(let t=0;t<256;t++){acc+=hist[t];if(acc>=n*.06){thr=Math.min(242,Math.max(200,t));break}}}
+    info.thr=thr;
+    for(let i=0,p=0;i<n;i++,p+=4){const v=rat[i]>thr?255:0;if(!v)black++;d[p]=d[p+1]=d[p+2]=v;d[p+3]=255}
     info.black=Math.round(black/n*1000)/10}
   x.putImageData(id,0,0);return {canvas:c,info}}
 /* Wie brauchbar ist ein Ergebnis? Gefundene Werte + echte Wörter */
@@ -184,7 +193,7 @@ async function read(file,progress){
       if(best.q>=8)break}}
   finally{onProg=null}
   if(!best){best=parse('');best.text='';best.q=0}
-  best.diag=log.map(i=>`${i.rot?i.rot+'° ':''}${i.plain?'grau ':''}${i.w}×${i.h}${i.blank?' LEER (Bild einfarbig, Helligkeit '+i.mean+')':' · Kontrast '+i.range+(i.black!=null?' · '+i.black+' % schwarz':'')+' · Güte '+i.q}`).join('\n');
+  best.diag=log.map(i=>`${i.rot?i.rot+'° ':''}${i.plain?'grau ':''}${i.w}×${i.h}${i.blank?' LEER (Bild einfarbig, Helligkeit '+i.mean+')':' · Kontrast '+i.range+(i.black!=null?' · '+i.black+' % schwarz (Schwelle '+i.thr+')':'')+(i.src?' · Foto '+i.src:'')+' · Güte '+i.q}`).join('\n');
   return best}
 /* ---------- Kilometerstand vom Tacho (vor dem Tanken) ----------
    Tacho-Anzeigen sind oft helle Ziffern auf dunklem Grund: Graustufen, Kontrast strecken, bei dunklem Bild umkehren.
